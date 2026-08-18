@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.idea/
+.vscode/
+
+# Live snapshots and derived tables (templates under data/overrides stay tracked)
+data/raw/snapshots/
+data/processed/
+*.parquet
+.env
+.env.*

@@ -1,0 +1,14 @@
+fpl:
+  base_url: https://fantasy.premierleague.com/api
+  timeout_seconds: 30
+  # FPL returns 403 for some default Python user-agents.
+  user_agent: Mozilla/5.0 (compatible; FPLAnalyser/0.1; local research)
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  overrides_dir: data/overrides
+
+cache:
+  # Reuse the latest on-disk snapshot unless it is older than this.
+  ttl_hours: 6
