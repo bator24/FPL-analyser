@@ -51,6 +51,34 @@ def test_filter_is_position_and_name_and_price() -> None:
     assert cheap.iloc[0]["name"] == "FWD0"
 
 
+def test_search_matches_second_name_and_ignores_regex() -> None:
+    cat = pd.DataFrame(
+        {
+            "element_id": [1, 2, 3],
+            "name": ["B.Fernandes", "Salah", "Palmer"],
+            "first_name": ["Bruno", "Mohamed", "Cole"],
+            "second_name": ["Fernandes", "Salah", "Palmer"],
+            "web_name": ["B.Fernandes", "Salah", "Palmer"],
+            "position": ["MID", "MID", "MID"],
+            "team": ["MUN", "LIV", "CHE"],
+            "cost_m": [12.0, 14.5, 10.5],
+            "points": [0, 0, 0],
+        }
+    )
+    bruno = filter_candidates(cat, position=None, exclude_ids=set(), name="fernandes")
+    assert set(bruno["name"]) == {"B.Fernandes"}
+    dots = filter_candidates(cat, position=None, exclude_ids=set(), name="B.Fernandes")
+    assert set(dots["name"]) == {"B.Fernandes"}
+    paren = filter_candidates(cat, position=None, exclude_ids=set(), name="(")
+    assert paren.empty
+
+
+def test_search_across_positions() -> None:
+    cat = _catalog()
+    out = filter_candidates(cat, position=None, exclude_ids=set(), name="FWD0")
+    assert list(out["position"]) == ["FWD"]
+
+
 def test_exclude_already_picked() -> None:
     cat = _catalog()
     eid = int(cat.loc[cat["position"] == "DEF", "element_id"].iloc[0])

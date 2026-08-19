@@ -137,6 +137,9 @@ def _player_catalog_live(settings) -> pd.DataFrame:
         for c in [
             "element_id",
             "name",
+            "first_name",
+            "second_name",
+            "web_name",
             "position",
             "team",
             "team_id",
@@ -245,8 +248,8 @@ def main() -> None:
 
     st.subheader("1. Your 15")
     st.caption(
-        "Click a shirt to fill that position. Filter the list on the right, **Place on pitch**, "
-        "then **Save squad** (2/5/5/3, ≤ £100m, max 3 per club). Or load your FPL team ID below."
+        "Type a name in **Search** (works even before you click a shirt). Click a shirt to browse that position. "
+        "Then **Place on pitch** and **Save squad** (2/5/5/3, ≤ £100m, max 3 per club). Or load your FPL team ID below."
     )
     saved_ids = _read_squad_ids(_squad_path())
     valid_ids = set(catalog["element_id"].tolist()) if not catalog.empty else set()

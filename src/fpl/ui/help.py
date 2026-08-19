@@ -26,7 +26,8 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 ### Pitch
 
 - Click an empty shirt (`+ MID`, …) or a filled one to replace them.
-- The panel on the right lists **that position only**. Filter by name, club, price, total points; sort as you like.
+- **Type a name in Search** (Salah, Fernandes, …). That box searches first/last/`web_name`, not the shirt you clicked. The **Choose** dropdown is also type-to-filter by those labels.
+- Filter further by club, price, total points; sort as you like.
 - Early in the season, **Pts** are often 0 — sort by price or form instead.
 - Injured / doubtful flags come from official FPL `news`, not a scrape. If a presser changes minutes, that still belongs in `data/overrides/xmins.csv` (not in this screen yet).
 

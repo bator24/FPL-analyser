@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 import pandas as pd
@@ -174,10 +175,28 @@ def would_break_club_cap(
     return bool(pd.Series(names).value_counts().max() > MAX_PER_CLUB)
 
 
+def fold_search(text: Any) -> str:
+    """Casefold and strip accents so 'Salah' / 'fernandes' / 'kadioglu' match."""
+    s = unicodedata.normalize("NFKD", str(text or ""))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.replace("ı", "i").replace("İ", "i").casefold()
+
+
+def search_blob(frame: pd.DataFrame) -> pd.Series:
+    parts = [frame["name"].astype("string").fillna("")]
+    for column in ("first_name", "second_name", "web_name", "team"):
+        if column in frame.columns:
+            parts.append(frame[column].astype("string").fillna(""))
+    joined = parts[0]
+    for extra in parts[1:]:
+        joined = joined + " " + extra
+    return joined.map(fold_search)
+
+
 def filter_candidates(
     catalog: pd.DataFrame,
     *,
-    position: str,
+    position: str | None,
     exclude_ids: set[int],
     name: str = "",
     min_cost: float | None = None,
@@ -193,11 +212,12 @@ def filter_candidates(
     out["element_id"] = pd.to_numeric(out["element_id"], errors="coerce")
     out = out.dropna(subset=["element_id"])
     out["element_id"] = out["element_id"].astype(int)
-    out = out.loc[out["position"] == position]
+    if position:
+        out = out.loc[out["position"] == position]
     out = out.loc[~out["element_id"].isin(exclude_ids)]
     if name.strip():
-        needle = name.strip().lower()
-        out = out.loc[out["name"].astype("string").str.lower().str.contains(needle, na=False)]
+        needle = fold_search(name.strip())
+        out = out.loc[search_blob(out).str.contains(needle, regex=False, na=False)]
     cost = pd.to_numeric(out.get("cost_m"), errors="coerce")
     if min_cost is not None:
         out = out.loc[cost >= float(min_cost)]
@@ -315,37 +335,71 @@ def render_squad_pitch(catalog: pd.DataFrame) -> list[int]:
     return flatten_slots(slots)
 
 
+def _first_empty_slot(slots: dict[str, list[int | None]], position: str) -> tuple[str, int] | None:
+    for i, eid in enumerate(slots.get(position, [])):
+        if eid is None:
+            return (position, i)
+    return None
+
+
+def _player_choice_label(row: pd.Series) -> str:
+    pts = pd.to_numeric(row.get("points"), errors="coerce")
+    cost = pd.to_numeric(row.get("cost_m"), errors="coerce")
+    pts_s = 0 if pd.isna(pts) else int(pts)
+    cost_s = 0.0 if pd.isna(cost) else float(cost)
+    pos = str(row.get("position") or "")
+    return f"{row['name']} · {pos} · {row['team']} · £{cost_s:.1f} · {pts_s} pts"
+
+
 def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) -> None:
     active = st.session_state.active_slot
     st.markdown("**Pick a player**")
+    st.caption("Type a name (Salah, Fernandes, …). You can search before clicking a shirt.")
+
+    pos: str | None
+    slot_i: int | None
+    current: int | None
     if active is None:
-        st.caption("Click a shirt on the pitch. That slot’s position is the filter.")
-        return
-    pos, slot_i = active
-    current = slots[pos][slot_i]
-    need = SQUAD_COUNTS[pos]
-    have = sum(x is not None for x in slots[pos])
-    st.caption(f"{pos} slot {slot_i + 1} · {have}/{need} filled")
+        pos, slot_i, current = None, None, None
+    else:
+        pos, slot_i = active
+        current = slots[pos][slot_i]
+        need = SQUAD_COUNTS[pos]
+        have = sum(x is not None for x in slots[pos])
+        st.caption(f"Selected shirt: {pos} slot {slot_i + 1} · {have}/{need} filled")
 
     occupied = set(flatten_slots(slots))
     if current is not None:
         occupied.discard(int(current))
 
-    name = st.text_input("Name", key="pick_name", placeholder="Search…")
+    query = st.text_input("Search", key="pick_name", placeholder="Name or club…", label_visibility="visible")
     teams = sorted(catalog["team"].dropna().astype(str).unique().tolist()) if not catalog.empty else []
     team_sel = st.multiselect("Club", options=teams, key="pick_teams")
     costs = pd.to_numeric(catalog.get("cost_m"), errors="coerce") if not catalog.empty else pd.Series(dtype=float)
     cmin = float(costs.min()) if costs.notna().any() else 4.0
     cmax = float(costs.max()) if costs.notna().any() else 15.0
-    price = st.slider("Price (£m)", min_value=round(cmin, 1), max_value=round(cmax, 1), value=(round(cmin, 1), round(cmax, 1)), step=0.5, key="pick_price")
+    price = st.slider(
+        "Price (£m)",
+        min_value=round(cmin, 1),
+        max_value=round(cmax, 1),
+        value=(round(cmin, 1), round(cmax, 1)),
+        step=0.5,
+        key="pick_price",
+    )
     min_pts = st.number_input("Min total points", min_value=0, value=0, step=1, key="pick_min_pts")
     sort_by = st.selectbox("Sort", options=list(SORT_OPTIONS), key="pick_sort")
 
+    # Empty search + a selected shirt → that position. A name query searches everyone.
+    position_filter = None if str(query).strip() else pos
+    if position_filter is None and not str(query).strip() and active is None:
+        st.info("Click a shirt on the pitch, or type a name above.")
+        return
+
     filtered = filter_candidates(
         catalog,
-        position=pos,
+        position=position_filter,
         exclude_ids=occupied,
-        name=name,
+        name=str(query or ""),
         min_cost=price[0],
         max_cost=price[1],
         min_points=float(min_pts),
@@ -354,11 +408,12 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
     )
     show_cols = [
         c
-        for c in ["name", "team", "cost_m", "points", "form", "selected_by_percent", "status"]
+        for c in ["name", "position", "team", "cost_m", "points", "form", "selected_by_percent", "status"]
         if c in filtered.columns
     ]
     rename = {
         "name": "Player",
+        "position": "Pos",
         "team": "Club",
         "cost_m": "£m",
         "points": "Pts",
@@ -367,7 +422,7 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
         "status": "Status",
     }
     if filtered.empty:
-        st.info("No players match those filters.")
+        st.info("No players match that search.")
         if current is not None and st.button("Clear slot", use_container_width=True):
             slots[pos][slot_i] = None
             st.session_state.squad_slots = slots
@@ -375,34 +430,48 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
         return
 
     st.dataframe(
-        filtered[show_cols].rename(columns=rename).head(60),
+        filtered[show_cols].rename(columns=rename).head(80),
         hide_index=True,
         use_container_width=True,
         height=280,
     )
-    options = filtered["element_id"].tolist()
-    choice_key = f"pick_choice_{pos}_{slot_i}"
-    if st.session_state.get(choice_key) not in options:
+    labels = [_player_choice_label(row) for _, row in filtered.iterrows()]
+    id_by_label = dict(zip(labels, filtered["element_id"].astype(int).tolist()))
+    # Duplicate labels are rare (same display); keep first.
+    unique_labels = list(dict.fromkeys(labels))
+    choice_key = "pick_choice_label"
+    if st.session_state.get(choice_key) not in unique_labels:
         st.session_state.pop(choice_key, None)
 
-    def _fmt(eid: int) -> str:
-        row = filtered.loc[filtered["element_id"] == eid].iloc[0]
-        pts = pd.to_numeric(row.get("points"), errors="coerce")
-        cost = pd.to_numeric(row.get("cost_m"), errors="coerce")
-        pts_s = 0 if pd.isna(pts) else int(pts)
-        cost_s = 0.0 if pd.isna(cost) else float(cost)
-        return f"{row['name']} · {row['team']} · £{cost_s:.1f} · {pts_s} pts"
+    chosen_label = st.selectbox(
+        "Choose (type here too)",
+        options=unique_labels,
+        key=choice_key,
+    )
+    chosen_id = int(id_by_label[chosen_label])
+    chosen_pos = str(filtered.loc[filtered["element_id"] == chosen_id, "position"].iloc[0])
+    chosen_pos = _safe_pos(chosen_pos)
 
-    chosen = st.selectbox("Choose", options=options, format_func=_fmt, key=f"pick_choice_{pos}_{slot_i}")
+    def _target_slot() -> tuple[str, int] | None:
+        if pos is not None and slot_i is not None and chosen_pos == pos:
+            return (pos, slot_i)
+        return _first_empty_slot(slots, chosen_pos)
+
     place, clear = st.columns(2)
     with place:
         if st.button("Place on pitch", type="primary", use_container_width=True):
-            if would_break_club_cap(slots, catalog, int(chosen), replacing=current):
+            target = _target_slot()
+            if target is None:
+                st.error(f"No empty {chosen_pos} shirt. Clear one first.")
+            elif would_break_club_cap(
+                slots, catalog, chosen_id, replacing=slots[target[0]][target[1]]
+            ):
                 st.error(f"Max {MAX_PER_CLUB} players per club.")
             else:
-                slots[pos][slot_i] = int(chosen)
+                tpos, ti = target
+                slots[tpos][ti] = chosen_id
                 st.session_state.squad_slots = slots
-                st.session_state.active_slot = _next_empty(slots, pos, slot_i)
+                st.session_state.active_slot = _next_empty(slots, tpos, ti)
                 st.rerun()
     with clear:
         if st.button("Clear slot", use_container_width=True, disabled=current is None):
