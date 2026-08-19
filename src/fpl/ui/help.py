@@ -25,7 +25,7 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 
 ### Pitch
 
-- Click an empty shirt (`+ MID`, …) or a filled one to replace them.
+- Click **Remove** under a filled shirt (or **Remove {name}** in the picker) to take them off. Clicking the shirt only selects it to replace.
 - **Type a name in Search** (Salah, Fernandes, …). That box searches first/last/`web_name`, not the shirt you clicked. The **Choose** dropdown is also type-to-filter by those labels.
 - Filter further by club, price, total points; sort as you like.
 - Early in the season, **Pts** are often 0 — sort by price or form instead.

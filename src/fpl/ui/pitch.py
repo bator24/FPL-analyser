@@ -48,6 +48,14 @@ div[data-testid="stVerticalBlock"]:has(> div > span.fpl-pitch-marker) [data-test
   background: #37003c;
   color: #fff;
 }
+div[data-testid="stVerticalBlock"]:has(> div > span.fpl-pitch-marker) [class*="st-key-rm_"] [data-testid="stButton"] > button {
+  min-height: 1.7rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.72rem;
+  background: #111;
+  border: 1px solid #fff;
+  color: #fff;
+}
 div[data-testid="stVerticalBlock"]:has(> div > span.fpl-pitch-marker) [data-testid="stButton"] > button:hover {
   border-color: #fff;
   color: #fff;
@@ -322,6 +330,16 @@ def render_squad_pitch(catalog: pd.DataFrame) -> list[int]:
                         ):
                             st.session_state.active_slot = (pos, slot_i)
                             st.rerun()
+                        if slots[pos][slot_i] is not None:
+                            if st.button(
+                                "Remove",
+                                key=f"rm_{pos}_{slot_i}",
+                                use_container_width=True,
+                            ):
+                                slots[pos][slot_i] = None
+                                st.session_state.squad_slots = slots
+                                st.session_state.active_slot = (pos, slot_i)
+                                st.rerun()
 
     with picker:
         _render_picker(catalog, slots)
@@ -367,6 +385,14 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
         need = SQUAD_COUNTS[pos]
         have = sum(x is not None for x in slots[pos])
         st.caption(f"Selected shirt: {pos} slot {slot_i + 1} · {have}/{need} filled")
+        if current is not None:
+            who = _player_row(catalog, current)
+            label = str(who["name"]) if who is not None else "this player"
+            if st.button(f"Remove {label}", key="picker_remove", use_container_width=True):
+                slots[pos][slot_i] = None
+                st.session_state.squad_slots = slots
+                st.session_state.active_slot = (pos, slot_i)
+                st.rerun()
 
     occupied = set(flatten_slots(slots))
     if current is not None:

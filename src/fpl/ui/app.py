@@ -248,7 +248,8 @@ def main() -> None:
 
     st.subheader("1. Your 15")
     st.caption(
-        "Type a name in **Search** (works even before you click a shirt). Click a shirt to browse that position. "
+        "Click a shirt to select it, **Remove** under the shirt to take them off. "
+        "Type a name in **Search** (works even before you click a shirt). "
         "Then **Place on pitch** and **Save squad** (2/5/5/3, ≤ £100m, max 3 per club). Or load your FPL team ID below."
     )
     saved_ids = _read_squad_ids(_squad_path())
