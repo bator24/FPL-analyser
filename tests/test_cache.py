@@ -1,24 +1,13 @@
 from datetime import timedelta
 from pathlib import Path
 
-from fpl.config import Settings
 from fpl.ingest.client import FplClient
 from fpl.ingest.pipeline import run_ingest
-from fpl.paths import project_root
+from tests.helpers import make_settings
 
 
-def _settings(tmp_path: Path) -> Settings:
-    root = project_root()
-    return Settings(
-        base_url="https://fantasy.premierleague.com/api",
-        timeout_seconds=5,
-        user_agent="test",
-        raw_dir=tmp_path / "raw",
-        processed_dir=tmp_path / "processed",
-        overrides_dir=tmp_path / "overrides",
-        ttl_hours=6,
-        root=root,
-    )
+def _settings(tmp_path: Path):
+    return make_settings(tmp_path)
 
 
 def test_second_load_uses_cache(tmp_path: Path) -> None:

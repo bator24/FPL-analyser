@@ -4,8 +4,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+from fpl.ingest.http import DownloadError, fetch_json
 
 Json = dict[str, Any] | list[Any]
 FetchFn = Callable[[str], Json]
@@ -25,15 +25,10 @@ class FplApiError(RuntimeError):
 
 
 def default_fetch_json(url: str, *, timeout: int, user_agent: str) -> Json:
-    request = Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
     try:
-        with urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
-    except HTTPError as exc:
-        raise FplApiError(f"FPL API HTTP {exc.code} for {url}") from exc
-    except URLError as exc:
-        raise FplApiError(f"FPL API request failed for {url}: {exc.reason}") from exc
-    return json.loads(body)
+        return fetch_json(url, timeout=timeout, user_agent=user_agent)
+    except DownloadError as exc:
+        raise FplApiError(str(exc)) from exc
 
 
 class FplClient:
@@ -140,3 +135,9 @@ class FplClient:
             "bootstrap": bootstrap,
             "fixtures": fixtures,
         }
+
+    def get_element_summary(self, element_id: int) -> dict[str, Any]:
+        payload = self._get(f"element-summary/{element_id}/")
+        if not isinstance(payload, dict):
+            raise FplApiError(f"Unexpected element-summary payload for {element_id}")
+        return payload

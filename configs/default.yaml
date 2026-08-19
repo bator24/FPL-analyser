@@ -12,3 +12,15 @@ data:
 cache:
   # Reuse the latest on-disk snapshot unless it is older than this.
   ttl_hours: 6
+
+history:
+  vaastav_base_url: https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data
+  current_season: "2026-27"
+  element_summary_delay: 0.12
+  seasons:
+    - "2020-21"
+    - "2021-22"
+    - "2022-23"
+    - "2023-24"
+    - "2024-25"
+    - "2025-26"

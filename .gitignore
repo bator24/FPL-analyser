@@ -13,6 +13,8 @@ build/
 
 # Live snapshots and derived tables (templates under data/overrides stay tracked)
 data/raw/snapshots/
+data/raw/vaastav/
+data/raw/element-summary/
 data/processed/
 *.parquet
 .env
