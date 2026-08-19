@@ -16,6 +16,7 @@ dependencies = [
     "joblib>=1.4",
     "scipy>=1.10",
     "pulp>=2.8",
+    "streamlit>=1.38",
 ]
 
 [project.optional-dependencies]

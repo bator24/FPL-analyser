@@ -12,9 +12,16 @@ def poisson_zero(lam: pd.Series | np.ndarray) -> np.ndarray:
 
 def team_goals_against_lambda(frame: pd.DataFrame) -> pd.Series:
     """Blend our recent GA with opponent recent GF. Home sides concede a bit less."""
-    our_ga = pd.to_numeric(frame.get("opp_goals_r5"), errors="coerce")
-    opp_gf = pd.to_numeric(frame.get("opp_gf_r5"), errors="coerce")
-    xgc = pd.to_numeric(frame.get("expected_goals_conceded_r5"), errors="coerce")
+    index = frame.index
+
+    def _col(name: str) -> pd.Series:
+        if name not in frame.columns:
+            return pd.Series(np.nan, index=index, dtype=float)
+        return pd.to_numeric(frame[name], errors="coerce")
+
+    our_ga = _col("opp_goals_r5")
+    opp_gf = _col("opp_gf_r5")
+    xgc = _col("expected_goals_conceded_r5")
     blended = (
         0.4 * our_ga.fillna(xgc).fillna(1.2)
         + 0.4 * opp_gf.fillna(our_ga).fillna(1.2)

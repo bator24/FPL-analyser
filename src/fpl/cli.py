@@ -47,8 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         "squad",
         help="Single-GW ILP: 15-man squad, XI, captain (risk-adjusted xPts)",
     )
-    squad.add_argument("--season", help="Season key, e.g. 2025-26 (default: latest in player_gw)")
-    squad.add_argument("--event", type=int, help="Gameweek number")
+    squad.add_argument(
+        "--season",
+        help="Season key, e.g. 2026-27 (default: live current season, else latest in player_gw)",
+    )
+    squad.add_argument("--event", type=int, help="Gameweek number (default: next unfinished fixture)")
     squad.add_argument("--budget", type=float, default=100.0, help="Budget in millions (default 100.0)")
     squad.add_argument(
         "--captain-p-play",
@@ -93,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     chips.add_argument("--max-transfers", type=int, default=3)
     chips.add_argument("--captain-p-play", type=float, default=0.75)
     chips.add_argument("--live-prices", action="store_true")
+    brief = sub.add_parser(
+        "brief",
+        help="Last-GW recap + this-GW HOLD/TAKE briefing for your 15",
+    )
+    brief.add_argument("--season", help="Season key (default: live current)")
+    brief.add_argument("--event", type=int, help="Gameweek (default: next unfinished)")
+    brief.add_argument("--squad", help="CSV of current 15 element_ids")
+    brief.add_argument("--free-transfers", type=int, default=1)
+    sub.add_parser("app", help="Open the local web UI (Streamlit)")
     return parser
 
 
@@ -203,6 +215,35 @@ def main(argv: list[str] | None = None) -> int:
             print(result["note"])
         print(f"Eval file: {result['eval_path']}")
         return 0
+    if args.command == "brief":
+        from pathlib import Path
+
+        from fpl.advisor.briefing import build_weekly_briefing, write_briefing
+        from fpl.config import load_settings
+        from fpl.optimize.transfers import load_squad_csv
+
+        cfg = load_settings()
+        squad_path = Path(args.squad) if args.squad else cfg.overrides_dir / "squad.csv"
+        try:
+            ids = load_squad_csv(squad_path)
+            result = build_weekly_briefing(
+                settings=cfg,
+                season=args.season,
+                event=args.event,
+                squad_ids=ids,
+                free_transfers=args.free_transfers,
+            )
+            path = write_briefing(result, settings=cfg)
+        except (RuntimeError, OSError, ValueError) as exc:
+            print(f"Briefing failed: {exc}", file=sys.stderr)
+            return 1
+        print(result["markdown"])
+        print(f"\nWrote {path}")
+        return 0
+    if args.command == "app":
+        from fpl.ui.launch import launch
+
+        return launch()
     return 1
 
 

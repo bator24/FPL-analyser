@@ -13,8 +13,7 @@ from fpl.config import Settings, load_settings
 from fpl.ingest.client import FplApiError, default_fetch_json
 from fpl.optimize.pool import (
     collapse_gameweek,
-    default_season_event,
-    overlay_live_prices,
+    load_prediction_pool,
     score_season,
 )
 from fpl.optimize.rules import (
@@ -319,6 +318,7 @@ def run_transfer(
     season: str | None = None,
     event: int | None = None,
     squad_path: Path | None = None,
+    squad_ids: list[int] | set[int] | None = None,
     team_id: int | None = None,
     from_prev_optimal: bool = False,
     bank_m: float | None = None,
@@ -333,30 +333,37 @@ def run_transfer(
     if not panel_path.exists():
         raise RuntimeError("Missing player_gw.parquet. Run `python -m fpl history` first.")
     panel = pd.read_parquet(panel_path)
-    if season is None or event is None:
-        d_season, d_event = default_season_event(panel)
-        season = season or d_season
-        event = event if event is not None else d_event
-    print(f"Scoring {season} GW{event} for transfers...", flush=True)
-    scored = score_season(panel, str(season))
-    pool = collapse_gameweek(
-        scored[pd.to_numeric(scored["event"], errors="coerce") == int(event)]
+    loaded = load_prediction_pool(
+        panel,
+        settings=cfg,
+        season=season,
+        event=event,
+        overlay_live=overlay_live,
     )
-    if pool.empty:
-        raise RuntimeError(f"No player_gw rows for {season} GW{event}")
-    players_path = cfg.processed_dir / "players.parquet"
-    if overlay_live and players_path.exists() and str(season) == cfg.current_season:
-        pool = overlay_live_prices(pool, pd.read_parquet(players_path))
+    print(f"Scoring {loaded.season} GW{loaded.event} ({loaded.source}) for transfers...", flush=True)
+    pool = loaded.pool
+    season = loaded.season
+    event = loaded.event
 
     current_meta = None
-    if squad_path is not None:
+    if squad_ids is not None:
+        current_ids = {int(i) for i in squad_ids}
+        if len(current_ids) != SQUAD_SIZE:
+            raise RuntimeError(f"squad_ids has {len(current_ids)} unique ids; need {SQUAD_SIZE}")
+    elif squad_path is not None:
         current_ids = set(load_squad_csv(Path(squad_path)))
     elif team_id is not None:
         picks, api_bank = fetch_entry_picks(int(team_id), int(event), settings=cfg)
         current_ids = set(picks)
         if bank_m is None:
             bank_m = api_bank
+    elif loaded.source == "live_prior":
+        raise RuntimeError(
+            "Live GW has no previous solver squad. Pass --squad data/overrides/squad.csv "
+            "or --team-id (your FPL entry id)."
+        )
     else:
+        scored = score_season(panel, str(season))
         prev = _current_from_prev_optimal(scored, int(event), captain_min_p_play=captain_min_p_play)
         current_ids = prev.squad_ids
         current_meta = prev.table
@@ -387,12 +394,8 @@ def run_transfer(
         "plan": plan,
         "eval_path": eval_path,
         "squad_path": squad_path_out,
-        "note": (
-            "2026/27 histories are empty until GW1 is written; "
-            "default slice is the latest season/event in player_gw."
-            if str(season) != cfg.current_season
-            else ""
-        ),
+        "note": loaded.note,
+        "pool_source": loaded.source,
     }
 
 

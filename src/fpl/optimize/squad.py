@@ -11,7 +11,7 @@ import pandas as pd
 import pulp
 
 from fpl.config import Settings, load_settings
-from fpl.optimize.pool import default_season_event, overlay_live_prices, score_gameweek, with_risk_columns
+from fpl.optimize.pool import load_prediction_pool, with_risk_columns
 from fpl.optimize.rules import (
     BUDGET_M,
     CAPTAIN_MIN_P_PLAY,
@@ -514,23 +514,22 @@ def run_squad(
     if not panel_path.exists():
         raise RuntimeError("Missing player_gw.parquet. Run `python -m fpl history` first.")
     panel = pd.read_parquet(panel_path)
-    if season is None or event is None:
-        d_season, d_event = default_season_event(panel)
-        season = season or d_season
-        event = event if event is not None else d_event
-    print(f"Scoring {season} GW{event} and solving ILP...", flush=True)
-    pool = score_gameweek(panel, str(season), int(event))
-    players_path = cfg.processed_dir / "players.parquet"
-    used_live = False
-    if overlay_live and players_path.exists() and str(season) == cfg.current_season:
-        pool = overlay_live_prices(pool, pd.read_parquet(players_path))
-        used_live = True
+    loaded = load_prediction_pool(
+        panel,
+        settings=cfg,
+        season=season,
+        event=event,
+        overlay_live=overlay_live,
+    )
+    print(f"Scoring {loaded.season} GW{loaded.event} ({loaded.source}) and solving ILP...", flush=True)
+    pool = loaded.pool
+    used_live = loaded.source == "live_prior" or overlay_live
     solution = solve_squad(
         pool,
         budget_m=budget_m,
         captain_min_p_play=captain_min_p_play,
-        season=str(season),
-        event=int(event),
+        season=loaded.season,
+        event=loaded.event,
     )
     cfg.eval_dir.mkdir(parents=True, exist_ok=True)
     keep = [
@@ -558,16 +557,15 @@ def run_squad(
     payload = solution_to_dict(solution)
     payload["n_pool"] = int(len(pool))
     payload["overlay_live_prices"] = used_live
+    payload["pool_source"] = loaded.source
+    payload["n_mapped"] = loaded.n_mapped
+    payload["n_unmapped"] = loaded.n_unmapped
     eval_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return {
         "solution": solution,
         "pool": pool,
         "eval_path": eval_path,
         "squad_path": out_path,
-        "note": (
-            "2026/27 histories are empty until GW1 is written; "
-            "default slice is the latest season/event in player_gw."
-            if str(season) != cfg.current_season
-            else ""
-        ),
+        "note": loaded.note,
+        "pool_source": loaded.source,
     }

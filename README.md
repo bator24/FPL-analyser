@@ -1,6 +1,6 @@
 # FPL analyser
 
-Local expected-points engine. Phase 0 is ingest only.
+Local expected-points engine (CLI + a basic local app). **How it works and how to use it:** [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Setup
 
@@ -8,6 +8,12 @@ Local expected-points engine. Phase 0 is ingest only.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
+```
+
+Open the local app (browser on your machine):
+
+```powershell
+python -m fpl app
 ```
 
 ## Ingest
@@ -73,8 +79,8 @@ Outputs: `data/processed/xpts_oos.parquet`, `data/processed/eval/xpts.json`
 Single-GW PuLP: 15-man squad, £100.0m, 3-per-club, legal XI, captain and vice. Objective is risk-adjusted (unconditional) `xPts`; captain is 2× that, but only eligible if `p_play` clears a gate (default 0.75).
 
 ```powershell
-python -m fpl squad
-python -m fpl squad --season 2025-26 --event 38
+python -m fpl squad                 # upcoming GW (live prices + last completed PL form)
+python -m fpl squad --season 2025-26 --event 38   # historical backtest
 ```
 
 Outputs: `data/processed/squad.parquet`, `data/processed/eval/squad.json`
@@ -86,13 +92,13 @@ Kill criterion: every solution is legal, and on a toy pool the solver matches br
 Myopic 0–3 transfers from a current 15. Hits cost 4 points. Hold (re-pick XI/captain only) is always the baseline. Wildcard is a Phase 4 rebuild (0 hits).
 
 ```powershell
-python -m fpl transfer --season 2025-26 --event 20
 python -m fpl transfer --squad data/overrides/squad.csv --free-transfers 1
-python -m fpl transfer --wildcard --season 2025-26 --event 20
+python -m fpl transfer --season 2025-26 --event 20
+python -m fpl transfer --wildcard --squad data/overrides/squad.csv
 python -m fpl transfer --backtest
 ```
 
-Without `--squad` / `--team-id`, the current 15 is last GW's solver squad (a backtest device, not your team).
+Without `--squad` / `--team-id` on a historical GW, the current 15 is last GW's solver squad (a backtest device). On the live season you must pass your 15.
 
 Outputs: `data/processed/transfers.parquet`, `data/processed/eval/transfers.json` (or `transfers_backtest.json`).
 
@@ -110,3 +116,14 @@ python -m fpl chips --squad data/overrides/squad.csv
 FH and WC share this-GW EV; they differ only in whether you keep the squad. BB after transfers is often weaker than BB on the hold 15 because the solver dumps enablers onto the bench.
 
 Output: `data/processed/eval/chips.json`
+
+## Advisor
+
+Last completed GW recap for your 15, then this week's HOLD/TAKE, captain, and chip EV — the engine in English, plus a chat that can only use those numbers.
+
+```powershell
+python -m fpl brief --squad data/overrides/squad.csv
+python -m fpl app
+```
+
+In the app: save your 15, then **Generate this week's briefing**. Optional `OPENAI_API_KEY` only rephrases; it must not invent news.
