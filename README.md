@@ -57,3 +57,56 @@ Outputs:
 - `data/processed/models/minutes.joblib`
 
 Kill criterion: beat rolling-3 MAE overall **and** on actual zeros.
+
+## Expected points
+
+Structural FPL scoring (appearance, xG, CS Poisson, BPS/bonus). Walk-forward vs last-5 and last-1. FPL `xP` is reported but labelled leaky. Shipped `xpts` is the structural model, not a blend with last-5.
+
+```powershell
+python -m fpl xpts
+```
+
+Outputs: `data/processed/xpts_oos.parquet`, `data/processed/eval/xpts.json`
+
+## Squad builder
+
+Single-GW PuLP: 15-man squad, £100.0m, 3-per-club, legal XI, captain and vice. Objective is risk-adjusted (unconditional) `xPts`; captain is 2× that, but only eligible if `p_play` clears a gate (default 0.75).
+
+```powershell
+python -m fpl squad
+python -m fpl squad --season 2025-26 --event 38
+```
+
+Outputs: `data/processed/squad.parquet`, `data/processed/eval/squad.json`
+
+Kill criterion: every solution is legal, and on a toy pool the solver matches brute force — including refusing to captain a high-mean rotation risk.
+
+## Transfers
+
+Myopic 0–3 transfers from a current 15. Hits cost 4 points. Hold (re-pick XI/captain only) is always the baseline. Wildcard is a Phase 4 rebuild (0 hits).
+
+```powershell
+python -m fpl transfer --season 2025-26 --event 20
+python -m fpl transfer --squad data/overrides/squad.csv --free-transfers 1
+python -m fpl transfer --wildcard --season 2025-26 --event 20
+python -m fpl transfer --backtest
+```
+
+Without `--squad` / `--team-id`, the current 15 is last GW's solver squad (a backtest device, not your team).
+
+Outputs: `data/processed/transfers.parquet`, `data/processed/eval/transfers.json` (or `transfers_backtest.json`).
+
+Kill criterion: a recommended hit has positive expected net vs doing nothing.
+
+## Chips
+
+This-GW expected points for Bench Boost, Triple Captain, and Free Hit / Wildcard versus hold and ordinary transfers. One chip per week. v1 does **not** auto-play a chip — saving TC for a nailed premium DGW is usually right even if this week’s extra copy looks fine.
+
+```powershell
+python -m fpl chips --season 2025-26 --event 20
+python -m fpl chips --squad data/overrides/squad.csv
+```
+
+FH and WC share this-GW EV; they differ only in whether you keep the squad. BB after transfers is often weaker than BB on the hold 15 because the solver dumps enablers onto the bench.
+
+Output: `data/processed/eval/chips.json`

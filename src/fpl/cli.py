@@ -6,7 +6,10 @@ import sys
 from fpl.ingest.client import FplApiError
 from fpl.ingest.history import format_history_report, run_history
 from fpl.ingest.pipeline import format_ingest_report, run_ingest
-from fpl.models.pipeline import format_minutes_report, run_minutes
+from fpl.models.pipeline import format_minutes_report, format_xpts_report, run_minutes, run_xpts
+from fpl.optimize.chips import format_chip_report, run_chips
+from fpl.optimize.squad import format_squad_report, run_squad
+from fpl.optimize.transfers import format_backtest_report, format_transfer_report, run_transfer, run_transfer_backtest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +39,60 @@ def build_parser() -> argparse.ArgumentParser:
         "minutes",
         help="Walk-forward minutes/rotation model vs rolling baselines",
     )
+    xpts = sub.add_parser(
+        "xpts",
+        help="Walk-forward expected points vs last-5 points and FPL xP",
+    )
+    squad = sub.add_parser(
+        "squad",
+        help="Single-GW ILP: 15-man squad, XI, captain (risk-adjusted xPts)",
+    )
+    squad.add_argument("--season", help="Season key, e.g. 2025-26 (default: latest in player_gw)")
+    squad.add_argument("--event", type=int, help="Gameweek number")
+    squad.add_argument("--budget", type=float, default=100.0, help="Budget in millions (default 100.0)")
+    squad.add_argument(
+        "--captain-p-play",
+        type=float,
+        default=0.75,
+        help="Minimum p_play to be eligible for the armband (default 0.75)",
+    )
+    squad.add_argument(
+        "--live-prices",
+        action="store_true",
+        help="Overlay current bootstrap prices when the season is the live one",
+    )
+    transfer = sub.add_parser(
+        "transfer",
+        help="Myopic transfers from a current 15: 0–3 moves, 4-pt hits vs hold",
+    )
+    transfer.add_argument("--season", help="Season key, e.g. 2025-26")
+    transfer.add_argument("--event", type=int, help="Gameweek number")
+    transfer.add_argument("--squad", help="CSV of current 15 element_ids")
+    transfer.add_argument("--team-id", type=int, help="FPL entry id (loads official picks)")
+    transfer.add_argument("--bank", type=float, help="ITB in millions (default: 100 minus current cost)")
+    transfer.add_argument("--free-transfers", type=int, default=1)
+    transfer.add_argument("--max-transfers", type=int, default=3)
+    transfer.add_argument("--captain-p-play", type=float, default=0.75)
+    transfer.add_argument("--wildcard", action="store_true", help="Rebuild the 15 (Phase 4, 0 hits)")
+    transfer.add_argument("--backtest", action="store_true", help="Walk selected GWs: prev optimal → transfers")
+    transfer.add_argument(
+        "--live-prices",
+        action="store_true",
+        help="Overlay current bootstrap prices when the season is the live one",
+    )
+    chips = sub.add_parser(
+        "chips",
+        help="This-GW EV for BB, TC, FH/WC vs hold and transfers (no auto-play)",
+    )
+    chips.add_argument("--season", help="Season key, e.g. 2025-26")
+    chips.add_argument("--event", type=int, help="Gameweek number")
+    chips.add_argument("--squad", help="CSV of current 15 element_ids")
+    chips.add_argument("--team-id", type=int, help="FPL entry id")
+    chips.add_argument("--bank", type=float, help="ITB in millions")
+    chips.add_argument("--free-transfers", type=int, default=1)
+    chips.add_argument("--max-transfers", type=int, default=3)
+    chips.add_argument("--captain-p-play", type=float, default=0.75)
+    chips.add_argument("--live-prices", action="store_true")
     return parser
 
 
@@ -73,6 +130,78 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Minutes model failed: {exc}", file=sys.stderr)
             return 1
         print(format_minutes_report(result))
+        return 0
+    if args.command == "xpts":
+        try:
+            result = run_xpts()
+        except (RuntimeError, OSError) as exc:
+            print(f"xPts failed: {exc}", file=sys.stderr)
+            return 1
+        print(format_xpts_report(result))
+        return 0
+    if args.command == "squad":
+        try:
+            result = run_squad(
+                season=args.season,
+                event=args.event,
+                budget_m=args.budget,
+                captain_min_p_play=args.captain_p_play,
+                overlay_live=args.live_prices,
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            print(f"Squad solver failed: {exc}", file=sys.stderr)
+            return 1
+        print(format_squad_report(result["solution"]))
+        if result.get("note"):
+            print(result["note"])
+        print(f"Eval file: {result['eval_path']}")
+        return 0
+    if args.command == "transfer":
+        try:
+            if args.backtest:
+                result = run_transfer_backtest()
+                print(format_backtest_report(result))
+                return 0
+            result = run_transfer(
+                season=args.season,
+                event=args.event,
+                squad_path=args.squad,
+                team_id=args.team_id,
+                bank_m=args.bank,
+                free_transfers=args.free_transfers,
+                max_transfers=args.max_transfers,
+                captain_min_p_play=args.captain_p_play,
+                wildcard=args.wildcard,
+                overlay_live=args.live_prices,
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            print(f"Transfer solver failed: {exc}", file=sys.stderr)
+            return 1
+        print(format_transfer_report(result["plan"]))
+        if result.get("note"):
+            print(result["note"])
+        print(f"Eval file: {result['eval_path']}")
+        return 0
+    if args.command == "chips":
+        try:
+            result = run_chips(
+                season=args.season,
+                event=args.event,
+                squad_path=args.squad,
+                team_id=args.team_id,
+                bank_m=args.bank,
+                free_transfers=args.free_transfers,
+                max_transfers=args.max_transfers,
+                captain_min_p_play=args.captain_p_play,
+                overlay_live=args.live_prices,
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            print(f"Chip EV failed: {exc}", file=sys.stderr)
+            return 1
+        print(format_chip_report(result["report"]))
+        if result.get("note"):
+            print(result["note"])
+        print(f"Eval file: {result['eval_path']}")
         return 0
     return 1
 

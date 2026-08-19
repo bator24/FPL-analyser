@@ -9,6 +9,7 @@ import pandas as pd
 
 from fpl.config import Settings, load_settings
 from fpl.eval.baselines import minutes_eval_table
+from fpl.eval.xpts import xpts_eval_table
 from fpl.models.minutes import (
     DEFAULT_TEST_SEASONS,
     MinutesModel,
@@ -16,6 +17,7 @@ from fpl.models.minutes import (
     baseline_minutes,
     walk_forward_predict,
 )
+from fpl.models.xpts import walk_forward_xpts
 
 
 def _load_overrides(path: Path) -> pd.DataFrame:
@@ -119,4 +121,113 @@ def format_minutes_report(result: dict[str, Any]) -> str:
         "Note: e_minutes is last-GW sticky prior; a minutes GBM lost to it on this panel.",
         f"Eval file: {result['eval_path']}",
     ]
+    return "\n".join(lines)
+
+
+def run_xpts(
+    *,
+    settings: Settings | None = None,
+    test_seasons: tuple[str, ...] = DEFAULT_TEST_SEASONS,
+) -> dict[str, Any]:
+    cfg = settings or load_settings()
+    panel_path = cfg.processed_dir / "player_gw.parquet"
+    if not panel_path.exists():
+        raise RuntimeError("Missing player_gw.parquet. Run `python -m fpl history` first.")
+    panel = pd.read_parquet(panel_path)
+    print(f"Walk-forward xPts on {len(panel)} rows...", flush=True)
+    oos = walk_forward_xpts(panel, test_seasons=test_seasons)
+    actual = pd.to_numeric(oos["total_points"], errors="coerce")
+    baselines = {
+        "total_points_r5": pd.to_numeric(oos["total_points_r5"], errors="coerce").fillna(0),
+        "total_points_lag1": pd.to_numeric(oos.get("total_points_lag1"), errors="coerce").fillna(0),
+        "structural": pd.to_numeric(oos["xpts_structural"], errors="coerce"),
+        "blend": 0.65 * pd.to_numeric(oos["xpts_structural"], errors="coerce")
+        + 0.35 * pd.to_numeric(oos["total_points_r5"], errors="coerce").fillna(0),
+        "fpl_xp_posthoc": pd.to_numeric(oos.get("fpl_xp_posthoc"), errors="coerce").fillna(0),
+    }
+    report = xpts_eval_table(
+        actual_points=actual,
+        model_points=pd.to_numeric(oos["xpts"], errors="coerce"),
+        baselines=baselines,
+        positions=oos.get("position"),
+    )
+    report["test_seasons"] = sorted(oos["season"].astype(str).unique().tolist())
+    report["note"] = (
+        "xpts is the structural FPL scoring model (minutes × rates + Poisson CS + BPS/bonus). "
+        "fpl_xp_posthoc is vaastav's post-match scrape — not a pre-deadline feature."
+    )
+    cfg.eval_dir.mkdir(parents=True, exist_ok=True)
+    keep = [
+        c
+        for c in [
+            "season",
+            "event",
+            "element_id",
+            "name",
+            "position",
+            "team",
+            "total_points",
+            "minutes",
+            "xpts",
+            "xpts_structural",
+            "xpts_r5",
+            "e_minutes",
+            "p_play",
+            "p_60",
+            "e_goals",
+            "e_assists",
+            "p_cs",
+            "e_bonus",
+            "e_bps",
+            "fold",
+        ]
+        if c in oos.columns
+    ]
+    oos[keep].to_parquet(cfg.processed_dir / "xpts_oos.parquet", index=False)
+    (cfg.eval_dir / "xpts.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return {"oos": oos, "report": report, "eval_path": cfg.eval_dir / "xpts.json"}
+
+
+def format_xpts_report(result: dict[str, Any]) -> str:
+    report = result["report"]
+    model = report["model"]
+    r5 = report["baselines"]["total_points_r5"]
+    lag1 = report["baselines"]["total_points_lag1"]
+    structural = report["baselines"]["structural"]
+    blend = report["baselines"].get("blend", structural)
+    xp = report["baselines"]["fpl_xp_posthoc"]
+    lines = [
+        "Expected points (season walk-forward)",
+        f"Test seasons: {', '.join(report['test_seasons'])}",
+        f"Rows: {report['n']}",
+        "",
+        "MAE points (lower is better):",
+        f"  shipped     {model['mae']:.3f}  Spearman {model['spearman']:.3f}",
+        f"  last-5      {r5['mae']:.3f}  Spearman {r5['spearman']:.3f}   MAE gap {model['mae'] - r5['mae']:+.3f}",
+        f"  last-1      {lag1['mae']:.3f}",
+        f"  blend       {blend['mae']:.3f}  Spearman {blend['spearman']:.3f}",
+        f"  FPL xP*     {xp['mae']:.3f}  (*post-match scrape, leaky)",
+        "",
+        "RMSE by actual return bucket:",
+    ]
+    for bucket in ("zeros", "blanks", "tickers", "haulers"):
+        m = model["buckets"][bucket]
+        b = r5["buckets"][bucket]
+        lines.append(
+            f"  {bucket:8} n={m['n']:<7} model {m['rmse']:.3f}  r5 {b['rmse']:.3f}"
+        )
+    if report.get("by_position"):
+        lines.append("\nBy position (shipped):")
+        for pos, row in report["by_position"].items():
+            lines.append(f"  {pos}  MAE {row['mae']:.3f}  Spearman {row['spearman']:.3f}  n={row['n']}")
+    lines.extend(
+        [
+            "",
+            f"Beats last-5 MAE: {report['beats_r5_mae']}",
+            f"Beats last-5 Spearman: {report['beats_r5_spearman']}",
+            f"Kill criterion (both): {report['kill_pass']}",
+            report.get("note", ""),
+            f"Eval file: {result['eval_path']}",
+        ]
+    )
     return "\n".join(lines)
