@@ -271,4 +271,4 @@ Useful flags: `--season 2025-26 --event 20`, `--squad data/overrides/squad.csv`,
 - Haul prediction is not the engine’s strongest bucket.
 - A web app would not fix any of the above; it would only wrap these commands.
 
-When 2026-27 rows start appearing in `player_gw`, the live pool switches to **this season's** completed matches automatically. Fill `squad.csv` with **this year's** `element_id`s and use `transfer` / `chips` as the weekly pair.
+When 2026-27 `player_gw` has a **real** GW panel (hundreds of players, not 18 leftover element-summary rows), the live pool switches to this season's completed matches. A stub does not count — that path was treating Haaland and Raya as appearance-only and benching them. Fill `squad.csv` with **this year's** `element_id`s and use `transfer` / `chips` as the weekly pair.

@@ -5,7 +5,9 @@ from fpl.models.prior import (
     apply_xmins_to_features,
     attach_event_fixtures,
     build_live_feature_frame,
+    current_season_form_usable,
     next_unfinished_event,
+    overlay_bootstrap_minutes,
     panel_has_gameweek,
     terminal_form,
 )
@@ -306,3 +308,99 @@ def test_panel_has_gameweek() -> None:
     panel = pd.DataFrame([_gw(1, 38, 90)])
     assert panel_has_gameweek(panel, "2025-26", 38)
     assert not panel_has_gameweek(panel, "2026-27", 1)
+
+
+def test_stub_current_season_is_not_usable_form() -> None:
+    stub = pd.DataFrame([_gw(500 + i, 1, 0) | {"season": "2026-27"} for i in range(18)])
+    assert current_season_form_usable(stub, "2026-27", n_live_players=610) is False
+    full = pd.DataFrame([_gw(i, 1, 90) | {"season": "2026-27"} for i in range(1, 250)])
+    assert current_season_form_usable(full, "2026-27", n_live_players=610) is True
+
+
+def test_load_prediction_pool_ignores_stub_current_season(tmp_path) -> None:
+    """18 new element-summary rows must not zero Haaland-shaped mapped players."""
+    settings = make_settings(tmp_path)
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+    settings.vaastav_dir.mkdir(parents=True, exist_ok=True)
+    (settings.vaastav_dir / "2025-26").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"id": [10], "code": [1000]}).to_csv(
+        settings.vaastav_dir / "2025-26" / "players_raw.csv", index=False
+    )
+    stub = [_gw(600 + i, 1, 0) | {"season": "2026-27"} for i in range(18)]
+    panel = pd.DataFrame([_gw(10, 38, 90), *stub])
+    players = pd.DataFrame(
+        [
+            {
+                "element_id": 99,
+                "code": 1000,
+                "web_name": "Haaland",
+                "team_id": 1,
+                "position": "FWD",
+                "now_cost": 155,
+                "cost_m": 15.5,
+                "status": "a",
+                "minutes": 90,
+                "starts": 1,
+                "chance_of_playing_next_round": 100,
+            }
+        ]
+    )
+    fixtures = pd.DataFrame(
+        [
+            {
+                "fixture_id": 1,
+                "event": 1,
+                "finished": False,
+                "kickoff_time": "2026-08-15T14:00:00Z",
+                "team_h": 1,
+                "team_a": 2,
+                "team_h_difficulty": 2,
+                "team_a_difficulty": 4,
+            }
+        ]
+    )
+    teams = pd.DataFrame({"team_id": [1, 2], "name": ["MCI", "AVL"], "short_name": ["MCI", "AVL"]})
+    players.to_parquet(settings.processed_dir / "players.parquet", index=False)
+    fixtures.to_parquet(settings.processed_dir / "fixtures.parquet", index=False)
+    teams.to_parquet(settings.processed_dir / "teams.parquet", index=False)
+    loaded = load_prediction_pool(panel, settings=settings, season="2026-27", event=1)
+    assert loaded.form_season == "2025-26"
+    assert loaded.n_mapped == 1
+    haal = loaded.pool.iloc[0]
+    assert float(haal["p_play"]) >= 0.9
+    assert float(haal["xpts"]) > 1.0
+
+
+def test_bootstrap_minutes_rescue_unmapped_who_already_played() -> None:
+    frame = pd.DataFrame(
+        {
+            "element_id": [50],
+            "mapped": [False],
+            "played_r5": [0.35],
+            "minutes_lag1": [21.0],
+        }
+    )
+    players = pd.DataFrame(
+        {"element_id": [50], "minutes": [90], "starts": [1], "web_name": ["Raya"]}
+    )
+    out = overlay_bootstrap_minutes(frame, players)
+    assert bool(out["mapped"].iloc[0]) is True
+    assert float(out["minutes_lag1"].iloc[0]) == 90
+    assert float(out["played_r5"].iloc[0]) == 1.0
+
+
+def test_bootstrap_start_floors_stale_last_season_p_play() -> None:
+    frame = pd.DataFrame(
+        {
+            "element_id": [411],
+            "mapped": [True],
+            "played_r5": [0.6],
+            "played_lag1": [0.0],
+            "played_60_r5": [0.6],
+            "minutes_lag1": [90.0],
+        }
+    )
+    players = pd.DataFrame({"element_id": [411], "minutes": [90], "starts": [1]})
+    out = overlay_bootstrap_minutes(frame, players)
+    assert float(out["played_r5"].iloc[0]) == 1.0
+    assert float(out["minutes_lag1"].iloc[0]) == 90.0

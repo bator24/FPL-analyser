@@ -11,6 +11,7 @@ import pandas as pd
 from fpl.config import Settings
 from fpl.models.prior import (
     build_live_feature_frame,
+    current_season_form_usable,
     ensure_code_map,
     next_unfinished_event,
     panel_has_gameweek,
@@ -176,11 +177,18 @@ def _live_note(*, season: str, event: int, form_season: str, map_by: str, n_mapp
         if map_by == "code"
         else f"{form_season} completed-match form (same ids)"
     )
+    extra = ""
+    if map_by == "code" and form_season != season:
+        extra = (
+            f" {season} player_gw is a stub, so form is {form_season} "
+            "(not a handful of new IDs pretending to be a gameweek)."
+        )
     return (
         f"Live pool for {season} GW{event}: {how}. "
         f"{n_mapped} players have PL history; {n_unmapped} are appearance-only "
         "(new to the league or unmapped). Prices, fixtures, and availability come from "
         "the FPL bootstrap (`news` / chance_of_playing), not a journalism scrape."
+        f"{extra}"
     )
 
 
@@ -222,6 +230,13 @@ def load_prediction_pool(
     event = int(event)
 
     use_history = panel_has_gameweek(panel, season, event)
+    if (
+        use_history
+        and live is not None
+        and season == settings.current_season
+        and not current_season_form_usable(panel, season, n_live_players=int(len(live["players"])))
+    ):
+        use_history = False
     if use_history:
         pool = score_gameweek(panel, season, event)
         used_live_prices = False
@@ -237,15 +252,17 @@ def load_prediction_pool(
     if live is None or season != settings.current_season:
         raise RuntimeError(f"No player_gw rows for {season} GW{event}")
 
-    current_rows = panel.loc[panel["season"].astype(str) == season]
-    if current_rows.empty:
-        form_season = prior_season_key(settings, panel, season)
-        map_by = "code"
-        code_map = ensure_code_map(settings, form_season)
-    else:
+    n_live = int(len(live["players"]))
+    overlay_season: str | None = None
+    if current_season_form_usable(panel, season, n_live_players=n_live):
         form_season = season
         map_by = "same_id"
         code_map = None
+    else:
+        form_season = prior_season_key(settings, panel, season)
+        map_by = "code"
+        code_map = ensure_code_map(settings, form_season)
+        overlay_season = season
 
     features, stats = build_live_feature_frame(
         panel,
@@ -258,6 +275,7 @@ def load_prediction_pool(
         teams=live["teams"],
         code_map=code_map,
         overrides=_overrides(settings),
+        overlay_season=overlay_season,
     )
     scored = structural_xpts(features)
     pool = collapse_gameweek(scored)

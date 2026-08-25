@@ -39,6 +39,9 @@ FORM_MEAN_COLUMNS = (
 
 UNAVAILABLE_STATUS = frozenset({"u", "n"})
 UNMAPPED_DEFAULT_P_PLAY = 0.35
+# A handful of element-summary rows is not a season. Switching the live pool
+# onto that stub made every unmapped premium look like a 0.35 appearance.
+FORM_COVERAGE_MIN_PLAYERS = 200
 
 
 def next_unfinished_event(
@@ -58,6 +61,29 @@ def next_unfinished_event(
             event_col = "event" if "event" in nxt.columns else "id"
             return int(pd.to_numeric(nxt[event_col], errors="coerce").iloc[0])
     raise RuntimeError("No upcoming fixtures in the snapshot. Run `python -m fpl ingest --refresh`.")
+
+
+def current_season_form_usable(
+    panel: pd.DataFrame,
+    season: str,
+    *,
+    n_live_players: int | None = None,
+) -> bool:
+    """True only when this season's player_gw covers a real squad, not a stub.
+
+    18 newly-scraped IDs after GW1 is not a GW1 panel. Using it as the form
+    source marks Haaland/Raya as unmapped and benches them on noise.
+    """
+    if panel is None or panel.empty:
+        return False
+    rows = panel.loc[panel["season"].astype(str) == str(season)]
+    if rows.empty or "element_id" not in rows.columns:
+        return False
+    n = int(pd.to_numeric(rows["element_id"], errors="coerce").nunique())
+    floor = FORM_COVERAGE_MIN_PLAYERS
+    if n_live_players is not None and n_live_players > 0:
+        floor = max(100, min(FORM_COVERAGE_MIN_PLAYERS, int(0.4 * int(n_live_players))))
+    return n >= floor
 
 
 def panel_has_gameweek(panel: pd.DataFrame, season: str, event: int) -> bool:
@@ -339,6 +365,107 @@ def apply_xmins_to_features(
     return merged.drop(columns=[c for c in merged.columns if c.endswith("_ov")])
 
 
+def overlay_form_by_element_id(live: pd.DataFrame, form: pd.DataFrame) -> pd.DataFrame:
+    """Prefer same-id current-season rolls where they exist (new signings with a GW row)."""
+    if form is None or form.empty or live.empty:
+        return live
+    extra = form.rename(columns={"prior_element_id": "element_id"})
+    if "element_id" not in extra.columns:
+        return live
+    extra["element_id"] = pd.to_numeric(extra["element_id"], errors="coerce")
+    extra = extra.dropna(subset=["element_id"])
+    extra["element_id"] = extra["element_id"].astype(int)
+    extra = extra.drop_duplicates("element_id", keep="last")
+    form_cols = [c for c in extra.columns if c != "element_id"]
+    merged = live.merge(extra, on="element_id", how="left", suffixes=("", "_ov"))
+    hit = pd.Series(False, index=merged.index)
+    for col in form_cols:
+        ov = f"{col}_ov"
+        if ov not in merged.columns:
+            continue
+        has = merged[ov].notna()
+        hit = hit | has
+        if col not in merged.columns:
+            merged[col] = merged[ov]
+        else:
+            merged[col] = merged[ov].where(has, merged[col])
+        merged = merged.drop(columns=[ov])
+    if "mapped" not in merged.columns:
+        merged["mapped"] = False
+    merged["mapped"] = merged["mapped"].fillna(False).astype(bool) | hit.fillna(False)
+    return merged
+
+
+def overlay_bootstrap_minutes(frame: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """Unmapped players who already played this season are not appearance-only 0.35."""
+    out = frame.copy()
+    if players is None or players.empty or "element_id" not in players.columns:
+        return out
+    boot = players.copy()
+    boot["element_id"] = pd.to_numeric(boot["element_id"], errors="coerce")
+    boot = boot.dropna(subset=["element_id"])
+    boot["element_id"] = boot["element_id"].astype(int)
+    mins = (
+        pd.to_numeric(boot["minutes"], errors="coerce")
+        if "minutes" in boot.columns
+        else pd.Series(0.0, index=boot.index)
+    )
+    starts = (
+        pd.to_numeric(boot["starts"], errors="coerce")
+        if "starts" in boot.columns
+        else pd.Series(0.0, index=boot.index)
+    )
+    boot["_boot_min"] = mins.fillna(0).clip(lower=0, upper=90)
+    boot["_boot_start"] = starts.fillna(0)
+    boot = boot.drop_duplicates("element_id", keep="last")
+    merged = out.merge(boot[["element_id", "_boot_min", "_boot_start"]], on="element_id", how="left")
+    mapped = (
+        merged["mapped"].fillna(False).astype(bool)
+        if "mapped" in merged.columns
+        else pd.Series(False, index=merged.index)
+    )
+    boot_min = merged["_boot_min"].fillna(0)
+    use = (~mapped) & (boot_min > 0)
+    started = use & (merged["_boot_start"].fillna(0) >= 1)
+    p = (boot_min / 90.0).clip(0.35, 1.0)
+    p = p.where(~started, 1.0)
+    for column in ("played_r5", "played_r3", "played_lag1"):
+        if column not in merged.columns:
+            merged[column] = np.nan
+        merged.loc[use, column] = p.loc[use]
+    if "played_60_r5" not in merged.columns:
+        merged["played_60_r5"] = np.nan
+    merged.loc[use, "played_60_r5"] = np.where(
+        boot_min.loc[use] >= 60, 1.0, (p.loc[use] * 0.7).to_numpy()
+    )
+    for column in ("minutes_lag1", "minutes_r3", "minutes_r5"):
+        if column not in merged.columns:
+            merged[column] = np.nan
+        merged.loc[use, column] = boot_min.loc[use]
+    if "mapped" not in merged.columns:
+        merged["mapped"] = False
+    merged.loc[use, "mapped"] = True
+    lag1 = pd.to_numeric(merged.get("minutes_lag1"), errors="coerce").fillna(0)
+    revive = mapped & (lag1 <= 0) & (boot_min >= 60)
+    merged.loc[revive, "minutes_lag1"] = boot_min.loc[revive]
+    if "played_lag1" in merged.columns:
+        merged.loc[revive, "played_lag1"] = 1.0
+    # GW1 is already in the bootstrap. Do not keep a last-season rotation haircut
+    # on someone who just started 60+ this season (Haaland p_play 0.60 → benched C).
+    started_now = (merged["_boot_start"].fillna(0) >= 1) & (boot_min >= 60)
+    if bool(started_now.any()):
+        for column in ("played_r5", "played_r3", "played_lag1", "played_60_r5"):
+            if column not in merged.columns:
+                merged[column] = np.nan
+            cur = pd.to_numeric(merged[column], errors="coerce").fillna(0)
+            merged.loc[started_now, column] = np.maximum(cur.loc[started_now].to_numpy(), 1.0)
+        lag1 = pd.to_numeric(merged.get("minutes_lag1"), errors="coerce").fillna(0)
+        merged.loc[started_now, "minutes_lag1"] = np.maximum(
+            lag1.loc[started_now].to_numpy(), boot_min.loc[started_now].to_numpy()
+        )
+    return merged.drop(columns=["_boot_min", "_boot_start"])
+
+
 def _fill_unmapped(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     mapped = (
@@ -383,6 +510,7 @@ def build_live_feature_frame(
     teams: pd.DataFrame | None = None,
     code_map: pd.DataFrame | None = None,
     overrides: pd.DataFrame | None = None,
+    overlay_season: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Live player rows with terminal form + this GW's fixtures. Not yet scored."""
     form = terminal_form(panel, form_season)
@@ -409,6 +537,9 @@ def build_live_feature_frame(
         )
         live["mapped"] = live["minutes_lag1"].notna() | live["played_r5"].notna()
 
+    if overlay_season and str(overlay_season) != str(form_season):
+        live = overlay_form_by_element_id(live, terminal_form(panel, overlay_season))
+    live = overlay_bootstrap_minutes(live, players)
     n_mapped = int(live["mapped"].fillna(False).sum())
     n_unmapped = int((~live["mapped"].fillna(False)).sum())
     live = _fill_unmapped(live)
