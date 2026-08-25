@@ -21,7 +21,7 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 3. Click **Save squad**. It stays disabled until you have 2 GKP / 5 DEF / 5 MID / 3 FWD, **£100.0m or less**, and at most 3 from one club.
 4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits.
 5. Optionally open **Chips**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
-6. Optionally open **Advisor**, generate the briefing, then ask **why that transfer**. The engine dumps the sale case: this-GW xPts, p_play, official FPL form, last recap, flags, and next-5 FDR (and will say if fixtures do *not* support the sale). It only uses engine numbers, not Twitter.
+6. Optionally open **Advisor**, generate the briefing, then ask **why that transfer**. The TAKE write-up argues like a conversation: expected points this week, whether they start, form, last match, official flags, and the next five fixtures — and will say if the fixtures do *not* support the sale. No spreadsheet codes. It only uses engine numbers, not Twitter.
 
 **Wildcard 15** ignores your team. Use it as a comparison, not as “my squad”.
 

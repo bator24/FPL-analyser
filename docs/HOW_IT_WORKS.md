@@ -130,7 +130,7 @@ Not a generic FPL chatbot. It writes a **weekly briefing** from your 15:
 - Last completed GW recap (or last season’s finale mapped by FPL `code` if 2026/27 has no rows yet)
 - This GW: HOLD vs TAKE, captain, chip EV — the same ILP as `transfer` / `chips`
 - Chat answers only from that briefing. Optional `OPENAI_API_KEY` rephrases; it still must not invent news or XIs
-- Sale reasons include official next-5 FDR (1 easiest, 5 hardest), FPL form, last recap, flags, and this-GW xPts — and will say when fixtures do **not** support the sale
+- A TAKE write-up argues in plain English (expected points, whether they start, form, last match, official flags, next five fixtures) and will say when fixtures do **not** support the sale
 
 ---
 

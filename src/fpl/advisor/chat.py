@@ -11,15 +11,16 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 SYSTEM = (
-    "You are the FPL analyser's manager. Use ONLY the JSON facts. "
-    "Do not invent injuries, lineups, cup form, or news. "
-    "If it is not in the facts, say you do not know. "
-    "When asked why a transfer, dump the full sale case: this-GW xPts (already haircut by p_play), "
-    "p_play, price, official FPL form, last recap minutes/points, FPL flags, and next-5 FDR "
-    "(1 easiest, 5 hardest). Say explicitly if fixtures support the sale or if the swap is "
-    "this-GW xPts only. TAKE only if expected_net vs hold is positive after 4-pt hits. "
-    "Chips are this-GW EV only — never tell the user to auto-play TC/BB/FH/WC. "
-    "Write a short analysis (not a one-liner). Speak in first person as the engine."
+    "You are a mate in the pub arguing FPL, not a spreadsheet. Use ONLY the JSON facts. "
+    "Do not invent injuries, lineups, cup form, or news. If it is not in the facts, say you do not know. "
+    "Never say xPts, p_play, FDR, EV, or other short codes. Say expected points this week, "
+    "chance he plays, FPL's fixture difficulty (1 easy, 5 brutal), and so on. "
+    "When asked why a transfer, argue the full case: expected points, whether they start, price, "
+    "official FPL form, last match, official FPL flags, and the next five fixtures. "
+    "Say if the fixtures actually support selling him, or if you are moving him for this week only. "
+    "Recommend the transfers only if expected_net vs hold is positive after 4-point hits. "
+    "Chips are this-week arithmetic only — never tell the user to auto-play TC/BB/FH/WC. "
+    "Write like you are talking. Speak in first person."
 )
 
 
@@ -57,55 +58,100 @@ def _pair_moves(
     return pairs
 
 
-def _flag_line(flags: list[dict[str, Any]], name: str) -> str:
+_FIXTURE_RE = re.compile(r"GW(\d+)\s+(\S+)\s+\(([HA])\)\s+FDR(\d|\?)", re.I)
+
+
+def _flag_sentence(flags: list[dict[str, Any]], name: str) -> str:
     folded = _fold(name)
     for row in flags:
-        if _fold(str(row.get("name") or "")) == folded:
-            news = str(row.get("news") or "").strip()
-            chance = row.get("chance_of_playing_next_round")
-            extra = f" ({chance:.0f}% next)" if isinstance(chance, (int, float)) else ""
-            return f" FPL flag: {row.get('status')}{extra}" + (f" — {news}" if news else ".")
+        if _fold(str(row.get("name") or "")) != folded:
+            continue
+        news = str(row.get("news") or "").strip()
+        chance = row.get("chance_of_playing_next_round")
+        bits = [f"FPL have flagged {name}"]
+        if news:
+            bits.append(f": {news.rstrip('.')}.")
+        elif not isinstance(chance, (int, float)):
+            bits.append(".")
+        if isinstance(chance, (int, float)):
+            bits.append(f" They only give him a {chance:.0f}% chance of playing next round.")
+        bits.append(" That's their official board, not a tweet.")
+        return "".join(bits)
     return ""
 
 
 def _fmt_num(row: dict[str, Any], key: str, digits: int = 1) -> str:
     if row.get(key) is None or str(row.get(key)) == "":
-        return "—"
+        return ""
     try:
         return f"{float(row[key]):.{digits}f}"
     except (TypeError, ValueError):
-        return "—"
+        return ""
 
 
-def _fmt_asset(row: dict[str, Any]) -> str:
-    if not row:
-        return "—"
-    name = str(row.get("name") or "?")
-    pos = str(row.get("position") or "")
+def _club_price(row: dict[str, Any]) -> str:
     club = str(row.get("team") or "").strip()
     cost = row.get("cost_m")
-    bits = [b for b in (pos, club) if b]
+    bits = [b for b in (club,) if b]
     if cost is not None and str(cost) != "":
         bits.append(f"£{float(cost):.1f}m")
-    prefix = ", ".join(bits)
-    form_s = _fmt_num(row, "form", 1)
-    return (
-        f"{name} ({prefix}: xPts {_num(row, 'xpts'):.2f}, "
-        f"p_play {_num(row, 'p_play'):.2f}, FPL form {form_s})"
-    )
+    return ", ".join(bits)
 
 
-def _fixture_block(row: dict[str, Any]) -> str:
-    if not row:
+def _starts_sentence(row: dict[str, Any], name: str) -> str:
+    p = _num(row, "p_play")
+    if p >= 0.95:
+        return f"{name} should start."
+    if p >= 0.75:
+        return f"{name} is likely to play, but I would not call him nailed — about a {p:.0%} chance."
+    if p >= 0.40:
+        return f"{name} is a rotation risk. I only give him about a {p:.0%} chance of featuring."
+    return f"I would not bank on {name} playing at all (about {p:.0%})."
+
+
+def _difficulty_aside(rating: str) -> str:
+    if rating == "5":
+        return "as hard as FPL will rate a game"
+    if rating == "4":
+        return "a tough one"
+    if rating == "3":
+        return "neither kind nor brutal"
+    if rating in {"1", "2"}:
+        return "a kind one"
+    return ""
+
+
+def _describe_fixture_label(label: str) -> str:
+    match = _FIXTURE_RE.search(str(label or ""))
+    if not match:
+        return str(label or "").strip()
+    gw, opp, side, rating = match.group(1), match.group(2), match.group(3), match.group(4)
+    where = f"at home to {opp}" if side == "H" else f"away at {opp}"
+    aside = _difficulty_aside(rating)
+    extra = f" ({aside})" if aside else ""
+    return f"gameweek {gw} {where}{extra}"
+
+
+def _fixtures_story(row: dict[str, Any]) -> str:
+    name = str(row.get("name") or "He")
+    labels = [p.strip() for p in str(row.get("next_5_text") or "").split(",") if p.strip()]
+    if not labels and row.get("this_gw"):
+        labels = [str(row["this_gw"])]
+    if not labels:
         return ""
-    parts: list[str] = []
-    if row.get("this_gw"):
-        parts.append(f"this GW {row['this_gw']}")
-    if row.get("next_5_text"):
-        parts.append(f"next 5 (official FPL FDR, 5=hardest): {row['next_5_text']}")
-    if row.get("fixture_verdict"):
-        parts.append(str(row["fixture_verdict"]))
-    return ". ".join(parts)
+    described = [_describe_fixture_label(lab) for lab in labels]
+    this = described[0]
+    sentences = [f"This week {name} has {this}."]
+    if len(described) > 1:
+        sentences.append("Then: " + "; ".join(described[1:]) + ".")
+    run = _run_kind(row)
+    if run == "hard":
+        sentences.append("That is a grim stretch.")
+    elif run == "kind":
+        sentences.append("That run is actually kind.")
+    elif run == "mixed":
+        sentences.append("Fixtures after that are a mixed bag.")
+    return " ".join(sentences)
 
 
 def _run_kind(row: dict[str, Any]) -> str:
@@ -132,91 +178,202 @@ def _fixture_compare(out: dict[str, Any], inn: dict[str, Any]) -> str:
     inn_name = str(inn.get("name") or "the incoming player")
     if out_run == "hard" and inn_run != "hard":
         return (
-            f"Fixture run supports selling {out_name}: hard stretch vs "
-            f"{inn_name}'s {inn_run or 'easier'} run."
+            f"So yes — the fixtures are an argument for selling {out_name}. "
+            f"{inn_name} has the kinder run of the two."
         )
     if out_run == "kind" and inn_run == "hard":
         return (
-            f"Fixtures argue against selling {out_name} — kind run vs {inn_name}'s hard stretch. "
-            "The swap is this-GW xPts (and minutes/flags), not a fixture punt."
+            f"I would not sell {out_name} because of fixtures — his are actually fine, "
+            f"and {inn_name}'s look worse. This swap is about this week's expected points, "
+            "not a fixture punt."
         )
     if out_run == "kind":
         return (
-            f"Fixtures do not argue for selling {out_name} — his next 5 are actually kind. "
-            "The swap is this-GW xPts, not a fixture punt."
+            f"I would not sell {out_name} because of fixtures — his next five are actually kind. "
+            "This swap is about this week's expected points, not a fixture punt."
         )
     if out_run == "hard":
-        return f"Hard fixtures are one reason {out_name} is on the chopping block."
+        return f"Those hard games are one reason {out_name} is on the chopping block."
     if out.get("next_5_text") or inn.get("next_5_text"):
-        return "Fixtures are mixed; they are not the main reason for the swap."
+        return "Fixtures are mixed, so they are not the main reason for the swap."
     return ""
 
 
-def _recap_line(recap: dict[str, Any], name: str) -> str:
+def _recap_sentence(recap: dict[str, Any], name: str) -> str:
     folded = _fold(name)
     for p in recap.get("players") or []:
         if _fold(str(p.get("name") or "")) == folded:
             return (
-                f"Last recap for {name}: {p.get('points', 0):.0f} pts in {p.get('minutes', 0):.0f}'."
+                f"Last time out {name} got {p.get('points', 0):.0f} points from "
+                f"{p.get('minutes', 0):.0f} minutes."
             )
     return ""
 
 
-def _sale_case(
+def _price_sentence(out: dict[str, Any], inn: dict[str, Any]) -> str:
+    try:
+        out_c = float(out["cost_m"]) if out.get("cost_m") is not None else None
+        in_c = float(inn["cost_m"]) if inn.get("cost_m") is not None else None
+    except (TypeError, ValueError):
+        return ""
+    if out_c is None or in_c is None:
+        return ""
+    gap = in_c - out_c
+    if gap > 0.05:
+        return f"You are not banking cash — {inn.get('name')} costs £{gap:.1f}m more."
+    if gap < -0.05:
+        return f"It also frees £{-gap:.1f}m, which is a nice side effect, not the reason."
+    return ""
+
+
+def _swap_story(
     out: dict[str, Any],
     inn: dict[str, Any],
     *,
     flags: list[dict[str, Any]],
     recap: dict[str, Any],
-) -> list[str]:
-    """Every official fact that supports (or does not support) selling `out`."""
-    lines: list[str] = []
-    delta = _num(inn, "xpts") - _num(out, "xpts")
-    lines.append(
-        f"  This-GW xPts {_num(out, 'xpts'):.2f} vs {_num(inn, 'xpts'):.2f} "
-        f"({delta:+.2f}), already haircut by p_play "
-        f"({_num(out, 'p_play'):.2f} vs {_num(inn, 'p_play'):.2f})."
+    focus: bool = False,
+) -> str:
+    """Pub-argument paragraph for one out → in. Numbers stay; short codes do not."""
+    out_n = str(out.get("name") or "him")
+    inn_n = str(inn.get("name") or "the replacement")
+    ox = _num(out, "xpts")
+    ix = _num(inn, "xpts")
+    sentences: list[str] = []
+    if focus:
+        sentences.append(f"You asked about {out_n}, so I will start there.")
+    who_out = _club_price(out)
+    who_in = _club_price(inn)
+    out_bit = f"{out_n} ({who_out})" if who_out else out_n
+    in_bit = f"{inn_n} ({who_in})" if who_in else inn_n
+    sentences.append(f"I'd sell {out_bit} for {in_bit}.")
+    sentences.append(
+        f"This week I only have {out_n} down for about {ox:.2f} points; {inn_n} is more like {ix:.2f}. "
+        "That already includes the chance they sit — I am not pretending everyone plays 90."
     )
-    if _num(inn, "p_play") - _num(out, "p_play") >= 0.10:
-        lines.append(
-            f"  Minutes: {out.get('name')} is less likely to play than {inn.get('name')}."
+    out_p = _num(out, "p_play")
+    inn_p = _num(inn, "p_play")
+    if abs(inn_p - out_p) >= 0.10:
+        sentences.append(_starts_sentence(out, out_n) + " " + _starts_sentence(inn, inn_n))
+    elif out_p < 0.95 or inn_p < 0.95:
+        sentences.append(_starts_sentence(out, out_n) + " " + _starts_sentence(inn, inn_n))
+    out_form, inn_form = _fmt_num(out, "form"), _fmt_num(inn, "form")
+    if out_form or inn_form:
+        sentences.append(
+            f"FPL has {out_n}'s recent form at {out_form or '—'} against {inn_n} at {inn_form or '—'}. "
+            "That is their last-30-days figure, not something I scraped."
         )
-    out_form, inn_form = out.get("form"), inn.get("form")
-    if isinstance(out_form, (int, float)) or isinstance(inn_form, (int, float)):
-        lines.append(
-            f"  Official FPL form {_fmt_num(out, 'form')} vs {_fmt_num(inn, 'form')} "
-            "(FPL's last-30-days figure, not a scrape)."
-        )
-    recap_line = _recap_line(recap, str(out.get("name") or ""))
-    if recap_line:
-        lines.append(f"  {recap_line}")
-    out_fx = _fixture_block(out)
-    if out_fx:
-        lines.append(f"  {out.get('name')}: {out_fx}")
-    inn_fx = _fixture_block(inn)
-    if inn_fx:
-        lines.append(f"  {inn.get('name')}: {inn_fx}")
+    recap_s = _recap_sentence(recap, out_n)
+    if recap_s:
+        sentences.append(recap_s)
+    fx_out = _fixtures_story(out)
+    if fx_out:
+        sentences.append(fx_out)
+    fx_in = _fixtures_story(inn)
+    if fx_in:
+        sentences.append(fx_in)
     compare = _fixture_compare(out, inn)
     if compare:
-        lines.append(f"  {compare}")
-    flag = _flag_line(flags, str(out.get("name") or "")).strip()
+        sentences.append(compare)
+    flag = _flag_sentence(flags, out_n)
     if flag:
-        lines.append(f"  {out.get('name')} {flag}")
-    in_flag = _flag_line(flags, str(inn.get("name") or "")).strip()
+        sentences.append(flag)
+    in_flag = _flag_sentence(flags, inn_n)
     if in_flag:
-        lines.append(f"  {inn.get('name')} {in_flag}")
-    try:
-        out_c = float(out["cost_m"]) if out.get("cost_m") is not None else None
-        in_c = float(inn["cost_m"]) if inn.get("cost_m") is not None else None
-    except (TypeError, ValueError):
-        out_c, in_c = None, None
-    if out_c is not None and in_c is not None:
-        gap = in_c - out_c
-        if gap > 0.05:
-            lines.append(f"  Price: not a cash-out — you spend £{gap:.1f}m more.")
-        elif gap < -0.05:
-            lines.append(f"  Price: frees £{-gap:.1f}m.")
-    return lines
+        sentences.append(in_flag)
+    price = _price_sentence(out, inn)
+    if price:
+        sentences.append(price)
+    return " ".join(s for s in sentences if s)
+
+
+def _hit_sentence(hits: int, n: int) -> str:
+    if n <= 0:
+        return "I would not move."
+    if hits <= 0:
+        if n == 1:
+            return "One move, and it is a free transfer."
+        return f"{n} moves, all on free transfers."
+    cost = 4 * hits
+    return (
+        f"{n} moves, and you would take a {cost}-point hit for the extra "
+        f"{'transfer' if hits == 1 else 'transfers'}."
+    )
+
+
+def take_argument(
+    upcoming: dict[str, Any],
+    recap: dict[str, Any] | None = None,
+    flags: list[dict[str, Any]] | None = None,
+    *,
+    focus: str | None = None,
+) -> str:
+    """Spoken TAKE (or HOLD) briefing. Same facts, no spreadsheet codes."""
+    recap = recap or {}
+    flags = flags or []
+    outs = list(upcoming.get("transfers_out") or [])
+    ins = list(upcoming.get("transfers_in") or [])
+    net = _num(upcoming, "expected_net")
+    hold_ev = _num(upcoming, "hold_ev")
+    chosen_ev = _num(upcoming, "chosen_ev")
+    hits = int(upcoming.get("hits") or 0)
+    n = int(upcoming.get("n_transfers") or 0)
+    action = upcoming.get("action") or "HOLD"
+    cap = upcoming.get("captain_hold") or {}
+
+    if action != "TAKE TRANSFERS" or n <= 0:
+        return (
+            f"**HOLD.** Sitting tight is worth about {hold_ev:.1f} points this week. "
+            f"Hunting a transfer only beats that by {net:+.1f} after hits — not enough to move. "
+            "Leave it unless a presser changes minutes (`data/overrides/xmins.csv`). "
+            "I do not scrape news."
+        )
+
+    focus_fold = _fold(focus) if focus else ""
+    pairs = _pair_moves(outs, ins)
+    if focus_fold:
+        pairs = sorted(
+            pairs,
+            key=lambda pair: 0
+            if focus_fold in _fold(f"{pair[0].get('name', '')} {pair[1].get('name', '')}")
+            else 1,
+        )
+
+    lines = [
+        f"**Take them.** {_hit_sentence(hits, n)} "
+        f"Doing nothing is worth about {hold_ev:.1f} points. After the hit the new 15 is still "
+        f"about {net:.1f} points better ({chosen_ev:.1f} vs {hold_ev:.1f}). "
+        "That is the whole case for doing it — not price rises, not your mini-league.",
+        "",
+    ]
+    for out, inn in pairs:
+        names = f"{out.get('name', '')} {inn.get('name', '')}"
+        is_focus = bool(focus_fold and focus_fold in _fold(names))
+        lines.append(_swap_story(out, inn, flags=flags, recap=recap, focus=is_focus))
+        lines.append("")
+    cap_name = str(cap.get("name") or "?")
+    lines.append(
+        f"I'd still give the armband to {cap_name}. "
+        f"I have him down for about {_num(cap, 'xpts'):.2f} points this week and he looks like starting. "
+        "The armband doubles that. I only give it to someone who actually looks like playing — "
+        "not the highest ceiling if they happen to start."
+    )
+    if upcoming.get("chip_beats_no_chip"):
+        lines.append(
+            f"A chip wins the arithmetic this week ({upcoming.get('chip_best_label')}). "
+            "That is not an instruction to play it. "
+            f"{upcoming.get('chip_note') or ''}".strip()
+        )
+    else:
+        lines.append(
+            "I would not play a chip this week. "
+            f"{upcoming.get('chip_note') or ''}".strip()
+        )
+    lines.append(
+        "I am recommending this only because you are still ahead after hits. "
+        "It is not team news."
+    )
+    return "\n".join(line for line in lines if line is not None).strip()
 
 
 def _named_rows(facts: dict[str, Any]) -> list[dict[str, Any]]:
@@ -255,52 +412,12 @@ def _mentioned(facts: dict[str, Any], question: str) -> list[str]:
 
 def explain_transfers(facts: dict[str, Any], *, focus: str | None = None) -> str:
     upcoming = facts.get("upcoming") or {}
-    flags = facts.get("flags") or []
-    recap = facts.get("recap") or {}
-    outs = list(upcoming.get("transfers_out") or [])
-    ins = list(upcoming.get("transfers_in") or [])
-    net = _num(upcoming, "expected_net")
-    hold_ev = _num(upcoming, "hold_ev")
-    chosen_ev = _num(upcoming, "chosen_ev")
-    hits = int(upcoming.get("hits") or 0)
-    n = int(upcoming.get("n_transfers") or 0)
-    action = upcoming.get("action") or "HOLD"
-
-    if action != "TAKE TRANSFERS" or n <= 0:
-        return (
-            f"HOLD. The transfer search is {net:+.2f} expected points vs doing nothing "
-            f"(hold EV {hold_ev:.2f}) after 4-point hits. That is not enough to move. "
-            "If a presser changes minutes, put it in `data/overrides/xmins.csv` — I do not scrape news."
-        )
-
-    hit_txt = f"{hits} hit(s) (−{4 * hits} pts)" if hits else "no hit (free transfer(s))"
-    lines = [
-        f"TAKE: {n} move(s), {hit_txt}. "
-        f"Hold EV {hold_ev:.2f} → chosen net {chosen_ev:.2f} ({net:+.2f} vs hold after hits).",
-        "",
-        "Why each move — every official fact I have, not news:",
-    ]
-    focus_fold = _fold(focus) if focus else ""
-    for out, inn in _pair_moves(outs, ins):
-        delta = _num(inn, "xpts") - _num(out, "xpts")
-        mark = ""
-        names = f"{out.get('name', '')} {inn.get('name', '')}"
-        if focus_fold and focus_fold in _fold(names):
-            mark = " ← this is the one you asked about"
-        lines.append(f"- {_fmt_asset(out)} → {_fmt_asset(inn)}. Swap {delta:+.2f} xPts.{mark}")
-        lines.extend(_sale_case(out, inn, flags=flags, recap=recap))
-    cap = upcoming.get("captain_hold") or {}
-    lines.append(
-        f"Captain on the hold 15 is {cap.get('name', '?')} "
-        f"(xPts {_num(cap, 'xpts'):.2f}) unless the new 15 changes the armband."
+    return take_argument(
+        upcoming,
+        facts.get("recap") or {},
+        facts.get("flags") or [],
+        focus=focus,
     )
-    lines.append(
-        "I recommend TAKE only because that net is positive after hits. "
-        "This is not a price-rise or mini-league call, and it is not team news."
-    )
-    if upcoming.get("engine_note"):
-        lines.append(str(upcoming["engine_note"]))
-    return "\n".join(lines)
 
 
 def _merged_named(facts: dict[str, Any], name: str) -> dict[str, Any]:
@@ -345,39 +462,41 @@ def _explain_player(facts: dict[str, Any], name: str, question: str) -> str:
     row = _merged_named(facts, name)
     bits: list[str] = []
     if row:
+        who = _club_price(row)
+        label = f"{name} ({who})" if who else name
         if row.get("xpts") is not None:
-            bits.append(_fmt_asset(row))
+            bits.append(
+                f"{label}: I have him down for about {_num(row, 'xpts'):.2f} points this week. "
+                + _starts_sentence(row, name)
+            )
         else:
-            club = str(row.get("team") or "").strip()
-            cost = row.get("cost_m")
-            cost_s = f" £{float(cost):.1f}m" if cost is not None and str(cost) != "" else ""
             form_s = _fmt_num(row, "form")
-            bits.append(f"{name} ({club}{cost_s}, FPL form {form_s})".replace("( ", "("))
-        fx = _fixture_block(row)
+            extra = f" FPL has his recent form at {form_s}." if form_s else ""
+            bits.append(f"{label}.{extra}".rstrip())
+        fx = _fixtures_story(row)
         if fx:
             bits.append(fx)
-    recap_line = _recap_line(recap, name)
-    if recap_line:
-        bits.append(recap_line + " Raw combined points — no captain, no auto-subs.")
+    recap_s = _recap_sentence(recap, name)
+    if recap_s:
+        bits.append(recap_s + " Raw combined points — no captain, no auto-subs.")
     for p in upcoming.get("xi") or []:
         if _fold(str(p.get("name") or "")) == folded:
-            cap = " Captain." if p.get("captain") else ""
+            cap_bit = " He is my captain." if p.get("captain") else ""
             bits.append(
-                f"{name} this GW on the hold XI: xPts {_num(p, 'xpts'):.2f}, "
-                f"p_play {_num(p, 'p_play'):.2f}.{cap}"
+                f"On the side I would field this week, {name} is in the eleven.{cap_bit}"
             )
-    flag = _flag_line(flags, name).strip()
+    flag = _flag_sentence(flags, name)
     if flag:
-        bits.append(f"{name} {flag}")
+        bits.append(flag)
     cap = upcoming.get("captain_hold") or {}
     if _fold(str(cap.get("name") or "")) == folded:
         bits.append(
-            f"I would captain {name} because that is the highest unconditional xPts "
-            "among players with p_play ≥ 0.75."
+            f"I'd captain {name} because that is the highest expected points "
+            "among the players who actually look like starting."
         )
     if not bits:
         bits.append(
-            f"{name} is on this briefing but I only have a name — no recap row and not in the hold XI."
+            f"{name} is on this briefing but I only have a name — no last-match row and not in the eleven."
         )
     return "\n".join(bits)
 
@@ -391,10 +510,10 @@ def local_reply(facts: dict[str, Any], question: str) -> str:
 
     last_kw = any(_has_word(q, w) for w in ("last", "previous", "recap", "yesterday")) or "how did" in q or "gw38" in q
     if last_kw and not mentioned:
-        bits = [recap.get("headline") or "No last-GW recap.", recap.get("note") or ""]
+        bits = [recap.get("headline") or "No last-week recap.", recap.get("note") or ""]
         if recap.get("best"):
             b = recap["best"]
-            bits.append(f"Best: {b['name']} {b['points']:.0f} pts.")
+            bits.append(f"Best: {b['name']} {b['points']:.0f} points.")
         if recap.get("did_not_play"):
             bits.append("Did not play: " + ", ".join(recap["did_not_play"]) + ".")
         return "\n".join(b for b in bits if b)
@@ -405,10 +524,10 @@ def local_reply(facts: dict[str, Any], question: str) -> str:
     if _has_word(q, "captain") or _has_word(q, "armband"):
         cap = upcoming.get("captain_hold") or {}
         return (
-            f"I would captain {cap.get('name', '?')} "
-            f"(xPts {_num(cap, 'xpts'):.2f}, p_play {_num(cap, 'p_play'):.2f}). "
-            "Armband is 2× unconditional xPts among players who clear the 0.75 minutes gate — "
-            "not the highest if-he-plays ceiling, and not a vibe pick."
+            f"I'd captain {cap.get('name', '?')}. "
+            f"I have him down for about {_num(cap, 'xpts'):.2f} points this week and he looks like starting. "
+            "The armband doubles that. I only give it to someone who actually looks like playing — "
+            "not the highest ceiling if they happen to start."
         )
 
     if any(_has_word(q, w) for w in ("chip", "triple", "wildcard")) or "bench boost" in q or "free hit" in q:

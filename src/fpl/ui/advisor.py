@@ -18,7 +18,7 @@ def render_advisor(
 ) -> None:
     st.caption(
         "Generate a last-GW recap plus this week's HOLD/TAKE and captain (same engine as **Transfers**). "
-        "Then ask **why that transfer** — the reply dumps the sale case (xPts, form, FDR, flags), not a one-liner. "
+        "Then ask **why that transfer** — the TAKE briefing argues the case in plain English, not xPts/p_play codes. "
         "Full click-order is in **How to use this app** at the top."
     )
     ready = len({int(i) for i in squad_ids}) == SQUAD_SIZE
@@ -64,7 +64,7 @@ def render_advisor(
         + (
             "OPENAI_API_KEY is set — wording may go through that API (squad facts leave your machine)."
             if remote
-            else "No API key: the engine still explains each move from xPts. Set OPENAI_API_KEY only if you want it rephrased."
+            else "No API key: the engine still argues each move in plain English. Set OPENAI_API_KEY only if you want it rephrased."
         )
     )
     for message in st.session_state.get("advisor_chat") or []:

@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from fpl.advisor.chat import _pair_moves
+from fpl.advisor.chat import take_argument
 from fpl.config import Settings, load_settings
 from fpl.models.horizon import enrich_rows, load_player_context, merge_context
 from fpl.models.prior import ensure_code_map, panel_has_gameweek, prior_season_key
@@ -370,7 +370,7 @@ def format_briefing(
         elif recap.get("blanks"):
             lines.append("Blanks (0 pts): " + ", ".join(recap["blanks"]) + ".")
         lines.append("")
-        lines.append("| Player | Pos | Club | Min | Pts | Form | Next 5 |")
+        lines.append("| Player | Position | Club | Minutes | Points | Form | Next fixtures |")
         lines.append("|---|---|---|---:|---:|---:|---|")
         for p in recap["players"]:
             form = p.get("form")
@@ -386,68 +386,30 @@ def format_briefing(
     if recap.get("missing_ids"):
         lines.append(f"Unmatched ids: {recap['missing_ids']}")
 
-    lines.extend(["", "## Upcoming gameweek — what to do and why"])
+    lines.extend(["", "## What I'd do this week"])
     if upcoming is None:
         lines.append("Save a legal 15 first, then generate the briefing.")
         return "\n".join(lines)
 
-    why_hold = (
-        f"Hold EV is {upcoming['hold_ev']:.2f}. "
-        f"The transfer search is {upcoming['expected_net']:+.2f} vs that after hits."
-    )
     if upcoming["action"] == "HOLD":
-        lines.append(f"**HOLD.** {why_hold} Do nothing unless a presser changes minutes (`xmins.csv`).")
-    else:
-        outs = ", ".join(str(r.get("name")) for r in upcoming["transfers_out"]) or "?"
-        ins = ", ".join(str(r.get("name")) for r in upcoming["transfers_in"]) or "?"
-        hit = f"{upcoming['hits']} hit(s)" if upcoming["hits"] else "free transfer(s)"
+        lines.append(take_argument(upcoming, recap, flags or []))
+        cap = upcoming["captain_hold"]
         lines.append(
-            f"**TAKE TRANSFERS** ({upcoming['n_transfers']} moves, {hit}): {outs} → {ins}. {why_hold}"
+            f"I'd give the armband to {cap['name']}. "
+            f"I have him down for about {float(cap['xpts']):.1f} points this week and he looks like starting."
         )
-        lines.append("")
-        lines.append("| Out | Club | Form | Next 5 | xPts | In | Club | Form | Next 5 | xPts | Δ |")
-        lines.append("|---|---|---:|---|---:|---|---|---:|---|---:|---:|")
-        for left, right in _pair_moves(upcoming.get("transfers_out") or [], upcoming.get("transfers_in") or []):
-            lx = float(left.get("xpts") or 0)
-            rx = float(right.get("xpts") or 0)
-            lf = left.get("form")
-            rf = right.get("form")
-            lf_s = f"{float(lf):.1f}" if isinstance(lf, (int, float)) else "—"
-            rf_s = f"{float(rf):.1f}" if isinstance(rf, (int, float)) else "—"
+        if upcoming["chip_beats_no_chip"]:
             lines.append(
-                f"| {left.get('name', '—')} | {left.get('team') or '—'} | {lf_s} | "
-                f"{left.get('next_5_short') or '—'} | {lx:.2f} | "
-                f"{right.get('name', '—')} | {right.get('team') or '—'} | {rf_s} | "
-                f"{right.get('next_5_short') or '—'} | {rx:.2f} | {rx - lx:+.2f} |"
+                f"A chip wins the arithmetic this week ({upcoming['chip_best_label']}). "
+                f"{upcoming['chip_note']}"
             )
-        for left, right in _pair_moves(upcoming.get("transfers_out") or [], upcoming.get("transfers_in") or []):
-            bits = []
-            if left.get("this_gw") or left.get("fixture_verdict"):
-                bits.append(
-                    f"{left.get('name')}: {left.get('this_gw') or ''} "
-                    f"{left.get('fixture_verdict') or ''}".strip()
-                )
-            if right.get("this_gw") or right.get("fixture_verdict"):
-                bits.append(
-                    f"{right.get('name')}: {right.get('this_gw') or ''} "
-                    f"{right.get('fixture_verdict') or ''}".strip()
-                )
-            if bits:
-                lines.append("- " + " | ".join(bits))
-    cap = upcoming["captain_hold"]
-    lines.append(
-        f"**Captain:** {cap['name']} (xPts {cap['xpts']:.2f}, p_play {cap['p_play']:.2f}). "
-        "Armband is 2× unconditional xPts among players with p_play ≥ 0.75 — not the highest if-he-plays ceiling."
-    )
-    if upcoming["chip_beats_no_chip"]:
-        lines.append(
-            f"**Chips:** {upcoming['chip_best_label']} wins this-GW arithmetic. "
-            f"{upcoming['chip_note']}"
-        )
+        else:
+            lines.append(
+                f"I would not play a chip — do not play one because a one-week table looks good. "
+                f"{upcoming['chip_note']}"
+            )
     else:
-        lines.append(
-            f"**Chips:** do not play one. Best no-chip is {upcoming['best_no_chip']}. {upcoming['chip_note']}"
-        )
+        lines.append(take_argument(upcoming, recap, flags or []))
     if upcoming.get("engine_note"):
         lines.extend(["", upcoming["engine_note"]])
     if flags:

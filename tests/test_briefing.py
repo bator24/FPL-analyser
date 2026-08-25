@@ -37,6 +37,73 @@ def test_recap_sums_and_flags_blanks() -> None:
     assert 99 in recap["missing_ids"]
 
 
+def test_format_briefing_take_is_spoken_english() -> None:
+    recap = {
+        "headline": "GW1",
+        "note": "",
+        "players": [],
+        "n_found": 0,
+        "total_points": 0,
+        "did_not_play": [],
+        "blanks": [],
+        "best": None,
+        "missing_ids": [],
+    }
+    upcoming = {
+        "season": "2026-27",
+        "event": 2,
+        "action": "TAKE TRANSFERS",
+        "expected_net": 7.88,
+        "hold_ev": 53.41,
+        "chosen_ev": 61.29,
+        "n_transfers": 1,
+        "hits": 1,
+        "transfers_out": [
+            {
+                "name": "Wilson",
+                "position": "MID",
+                "cost_m": 6.5,
+                "xpts": 1.98,
+                "p_play": 1.0,
+                "team": "WHU",
+                "form": 1.2,
+                "this_gw": "GW2 CHE (A) FDR5",
+                "next_5_text": "GW2 CHE (A) FDR5, GW3 BUR (H) FDR2",
+                "fixture_verdict": "Hard fixture ahead (next FDR 5). Hard run (1 of 2 at FDR 4+; mean 3.5).",
+                "next_fdr": 5,
+            }
+        ],
+        "transfers_in": [
+            {
+                "name": "Gomez",
+                "position": "MID",
+                "cost_m": 5.0,
+                "xpts": 4.50,
+                "p_play": 1.0,
+                "team": "BRI",
+                "form": 4.0,
+                "this_gw": "GW2 WOL (H) FDR2",
+                "next_5_text": "GW2 WOL (H) FDR2",
+                "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 1 at FDR 4+).",
+                "next_fdr": 2,
+            }
+        ],
+        "captain_hold": {"name": "Haaland", "xpts": 7.0, "p_play": 1.0},
+        "chip_beats_no_chip": False,
+        "best_no_chip": "transfers",
+        "chip_note": "Do not auto-play.",
+        "engine_note": "",
+    }
+    text = format_briefing(recap, upcoming)
+    assert "I'd sell Wilson" in text or "I'd sell Wilson (WHU" in text
+    assert "Take them" in text
+    assert "xPts" not in text
+    assert "p_play" not in text
+    assert "| Out |" not in text
+    assert "away at CHE" in text
+    assert "Haaland" in text
+
+
 def test_format_briefing_hold_and_captain() -> None:
     recap = {
         "headline": "No 2026-27 matches yet. Last completed PL: 2025-26 GW38",
@@ -202,13 +269,15 @@ def test_local_reply_explains_why_player_is_out() -> None:
     text = local_reply(facts, "why do you want to transfer out wilson")
     assert "Wilson" in text
     assert "1.98" in text
-    assert "TAKE" in text
-    assert "this is the one you asked about" in text
-    assert "Hard fixture ahead" in text
-    assert "CHE (A) FDR5" in text
-    assert "FPL form" in text
-    assert "Last recap for Wilson" in text
-    assert "Fixture run supports selling Wilson" in text
+    assert "Take them" in text
+    assert "You asked about Wilson" in text
+    assert "away at CHE" in text
+    assert "grim stretch" in text
+    assert "recent form" in text
+    assert "Last time out Wilson" in text
+    assert "argument for selling Wilson" in text
+    assert "xPts" not in text
+    assert "p_play" not in text
     assert "Knock" in local_reply(facts, "why anderson")
 
 
@@ -262,5 +331,5 @@ def test_local_reply_is_honest_when_fixtures_are_kind() -> None:
         "flags": [],
     }
     text = local_reply(facts, "why sell palmer")
-    assert "Fixtures argue against selling Palmer" in text
+    assert "I would not sell Palmer because of fixtures" in text
     assert "not a fixture punt" in text
