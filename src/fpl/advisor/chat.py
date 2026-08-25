@@ -18,7 +18,9 @@ SYSTEM = (
     "When asked why a transfer, argue the full case: expected points, whether they start, price, "
     "official FPL form, last match, official FPL flags, and the next five fixtures. "
     "Say if the fixtures actually support selling him, or if you are moving him for this week only. "
-    "Recommend the transfers only if expected_net vs hold is positive after 4-point hits. "
+    "Recommend the headline transfers only if expected_net vs hold is positive after 4-point hits. "
+    "Always offer the other legal ideas in `alternatives`: best single, next-best single, "
+    "and each half of a multi-move scored on its own. Say if a half does not fit the bank. "
     "Chips are this-week arithmetic only — never tell the user to auto-play TC/BB/FH/WC. "
     "Write like you are talking. Speak in first person."
 )
@@ -287,6 +289,68 @@ def _swap_story(
     return " ".join(s for s in sentences if s)
 
 
+def _move_names(opt: dict[str, Any]) -> str:
+    outs = ", ".join(str(r.get("name") or "?") for r in opt.get("transfers_out") or []) or "—"
+    ins = ", ".join(str(r.get("name") or "?") for r in opt.get("transfers_in") or []) or "—"
+    return f"{outs} → {ins}"
+
+
+def _alternatives_section(
+    alts: list[dict[str, Any]],
+    *,
+    focus: str | None = None,
+) -> str:
+    if not alts:
+        return ""
+    focus_fold = _fold(focus) if focus else ""
+    ordered = list(alts)
+    if focus_fold:
+        ordered = sorted(
+            ordered,
+            key=lambda alt: 0
+            if focus_fold in _fold(_move_names(alt))
+            else 1,
+        )
+    lines = [
+        "If you do not want the headline package — tight bank, or you only like one of the moves — "
+        "pick **one** of these instead. You do not have to do the rest.",
+        "",
+    ]
+    for alt in ordered:
+        names = _move_names(alt)
+        net = float(alt.get("expected_net") or 0)
+        hits = int(alt.get("hits") or 0)
+        hit_txt = "free transfer" if hits <= 0 else f"{hits} hit (−{4 * hits} pts)"
+        mark = ""
+        if focus_fold and focus_fold in _fold(names):
+            mark = " This is the one that involves the player you asked about."
+        if not alt.get("legal", True):
+            lines.append(
+                f"**{alt.get('label')}:** {names}. This does not fit on its own "
+                "(budget or three-per-club). The other sale in the package is what funds it — "
+                f"you cannot take this idea by itself.{mark}"
+            )
+        else:
+            if net > 0.05:
+                worth = (
+                    f"About {net:+.1f} expected points vs doing nothing ({hit_txt}). "
+                    "I'd take this if it is the move you actually want."
+                )
+            elif net < -0.05:
+                worth = (
+                    f"Legal on its own, but about {net:.1f} vs doing nothing ({hit_txt}). "
+                    "I would not do this one unless you have a reason the engine does not have."
+                )
+            else:
+                worth = f"Roughly even with doing nothing ({hit_txt})."
+            half = ""
+            if "half of the headline" in str(alt.get("note") or ""):
+                half = " This is one half of the headline package — you can take it without the other move."
+            lines.append(f"**{alt.get('label')}:** {names}. {worth}{half}{mark}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def _hit_sentence(hits: int, n: int) -> str:
     if n <= 0:
         return "I would not move."
@@ -321,13 +385,16 @@ def take_argument(
     action = upcoming.get("action") or "HOLD"
     cap = upcoming.get("captain_hold") or {}
 
+    alts = list(upcoming.get("alternatives") or [])
     if action != "TAKE TRANSFERS" or n <= 0:
-        return (
+        hold_txt = (
             f"**HOLD.** Sitting tight is worth about {hold_ev:.1f} points this week. "
             f"Hunting a transfer only beats that by {net:+.1f} after hits — not enough to move. "
             "Leave it unless a presser changes minutes (`data/overrides/xmins.csv`). "
             "I do not scrape news."
         )
+        extra = _alternatives_section(alts, focus=focus)
+        return f"{hold_txt}\n\n{extra}".strip() if extra else hold_txt
 
     focus_fold = _fold(focus) if focus else ""
     pairs = _pair_moves(outs, ins)
@@ -370,15 +437,23 @@ def take_argument(
             f"{upcoming.get('chip_note') or ''}".strip()
         )
     lines.append(
-        "I am recommending this only because you are still ahead after hits. "
-        "It is not team news."
+        "I am recommending the headline only because you are still ahead after hits. "
+        "It is not team news. If you only want one of the moves, use the list below — "
+        "do not try to split a bundle that does not fit your bank."
     )
+    extra = _alternatives_section(alts, focus=focus)
+    if extra:
+        lines.extend(["", extra])
     return "\n".join(line for line in lines if line is not None).strip()
 
 
 def _named_rows(facts: dict[str, Any]) -> list[dict[str, Any]]:
     upcoming = facts.get("upcoming") or {}
     recap = facts.get("recap") or {}
+    alt_rows: list[dict[str, Any]] = []
+    for alt in upcoming.get("alternatives") or []:
+        alt_rows.extend(alt.get("transfers_out") or [])
+        alt_rows.extend(alt.get("transfers_in") or [])
     rows: list[dict[str, Any]] = []
     for bucket in (
         recap.get("players") or [],
@@ -386,6 +461,7 @@ def _named_rows(facts: dict[str, Any]) -> list[dict[str, Any]]:
         facts.get("flags") or [],
         upcoming.get("transfers_out") or [],
         upcoming.get("transfers_in") or [],
+        alt_rows,
         [upcoming.get("captain_hold") or {}],
         [upcoming.get("captain_after") or {}],
         facts.get("roster") or [],

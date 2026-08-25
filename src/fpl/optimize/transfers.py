@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,7 @@ class TransferPlan:
     expected_net: float
     recommend: bool
     mode: str
+    alternatives: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def n_transfers(self) -> int:
@@ -129,6 +130,307 @@ def _rows_for_ids(table: pd.DataFrame, ids: set[int]) -> list[dict[str, Any]]:
     keep = [c for c in ["element_id", "name", "position", "cost_m", "xpts", "p_play"] if c in table.columns]
     subset = table[table["element_id"].isin(ids)]
     return subset[keep].to_dict(orient="records")
+
+
+def _pair_by_position(
+    outs: list[dict[str, Any]], ins: list[dict[str, Any]]
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    remaining = list(ins)
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for out in outs:
+        pos = str(out.get("position") or "")
+        idx = next((i for i, inn in enumerate(remaining) if str(inn.get("position") or "") == pos), None)
+        if idx is None:
+            idx = 0 if remaining else None
+        inn = remaining.pop(idx) if idx is not None else {}
+        pairs.append((out, inn))
+    return pairs
+
+
+def _id_set(rows: list[dict[str, Any]]) -> set[int]:
+    out: set[int] = set()
+    for row in rows:
+        try:
+            out.add(int(row["element_id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _option_fingerprint(out_ids: set[int], in_ids: set[int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    return (tuple(sorted(out_ids)), tuple(sorted(in_ids)))
+
+
+def _option_dict(
+    *,
+    key: str,
+    label: str,
+    n_transfers: int,
+    hits: int,
+    expected_net: float,
+    transfers_out: list[dict[str, Any]],
+    transfers_in: list[dict[str, Any]],
+    legal: bool,
+    note: str = "",
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "n_transfers": int(n_transfers),
+        "hits": int(hits),
+        "expected_net": float(expected_net),
+        "transfers_out": transfers_out,
+        "transfers_in": transfers_in,
+        "legal": bool(legal),
+        "note": note,
+    }
+
+
+def _option_from_solution(
+    current: set[int],
+    hold: SquadSolution,
+    sol: SquadSolution,
+    names: pd.DataFrame,
+    *,
+    key: str,
+    label: str,
+    note: str = "",
+) -> dict[str, Any]:
+    out_ids = current - sol.squad_ids
+    in_ids = sol.squad_ids - current
+    return _option_dict(
+        key=key,
+        label=label,
+        n_transfers=sol.n_transfers,
+        hits=sol.hits,
+        expected_net=float(sol.net_objective - hold.objective),
+        transfers_out=_rows_for_ids(names, out_ids),
+        transfers_in=_rows_for_ids(names, in_ids),
+        legal=True,
+        note=note,
+    )
+
+
+def _score_locked_squad(
+    work: pd.DataFrame,
+    current: set[int],
+    new_ids: set[int],
+    hold: SquadSolution,
+    *,
+    budget: float,
+    names: pd.DataFrame,
+    free_transfers: int,
+    hit_cost: float,
+    captain_min_p_play: float,
+    season: str | None,
+    event: int | None,
+    key: str,
+    label: str,
+    note: str = "",
+) -> dict[str, Any] | None:
+    if len(new_ids) != SQUAD_SIZE:
+        return None
+    n = len(current - new_ids)
+    if n <= 0:
+        return None
+    hits = max(0, n - int(free_transfers))
+    try:
+        sol = solve_squad(
+            work,
+            budget_m=budget,
+            captain_min_p_play=captain_min_p_play,
+            season=season,
+            event=event,
+            locked_ids=new_ids,
+            time_limit=30,
+        )
+    except RuntimeError:
+        out_ids = current - new_ids
+        in_ids = new_ids - current
+        return _option_dict(
+            key=key,
+            label=label,
+            n_transfers=n,
+            hits=hits,
+            expected_net=0.0,
+            transfers_out=_rows_for_ids(names, out_ids),
+            transfers_in=_rows_for_ids(names, in_ids),
+            legal=False,
+            note=note or "This move does not fit — budget or three-per-club. You cannot take it on its own.",
+        )
+    net = float(sol.objective - hits * float(hit_cost) - hold.objective)
+    out_ids = current - sol.squad_ids
+    in_ids = sol.squad_ids - current
+    return _option_dict(
+        key=key,
+        label=label,
+        n_transfers=n,
+        hits=hits,
+        expected_net=net,
+        transfers_out=_rows_for_ids(names, out_ids),
+        transfers_in=_rows_for_ids(names, in_ids),
+        legal=True,
+        note=note,
+    )
+
+
+def build_transfer_menu(
+    work: pd.DataFrame,
+    current: set[int],
+    hold: SquadSolution,
+    chosen: SquadSolution,
+    names: pd.DataFrame,
+    *,
+    budget: float,
+    free_transfers: int,
+    max_transfers: int,
+    hit_cost: float,
+    captain_min_p_play: float,
+    season: str | None,
+    event: int | None,
+) -> list[dict[str, Any]]:
+    """Legal other ideas besides the headline plan. One-move options first.
+
+    A two-move TAKE is a bundle. If the user only likes one half, or the bank is tight,
+    they need the best single and each half scored on its own.
+    """
+    headline = _option_fingerprint(current - chosen.squad_ids, chosen.squad_ids - current)
+    seen: set[tuple[tuple[int, ...], tuple[int, ...]]] = {headline}
+    menu: list[dict[str, Any]] = []
+
+    def _add(opt: dict[str, Any] | None) -> None:
+        if not opt:
+            return
+        fp = _option_fingerprint(_id_set(opt["transfers_out"]), _id_set(opt["transfers_in"]))
+        if not fp[0]:
+            return
+        if fp in seen:
+            if str(opt.get("key") or "").startswith("only_"):
+                for row in menu:
+                    existing = _option_fingerprint(
+                        _id_set(row["transfers_out"]), _id_set(row["transfers_in"])
+                    )
+                    if existing != fp:
+                        continue
+                    row["label"] = opt.get("label") or row.get("label")
+                    extra = " This is one half of the headline package, scored on its own."
+                    note = row.get("note") or ""
+                    if "half of the headline" not in note:
+                        row["note"] = (note + extra).strip()
+                    if not opt.get("legal", True):
+                        row["legal"] = False
+                        row["note"] = opt.get("note") or row["note"]
+                    break
+            return
+        seen.add(fp)
+        menu.append(opt)
+
+    for k, label in ((1, "Best single transfer"), (2, "Best two transfers"), (3, "Best three transfers")):
+        if k > int(max_transfers) or k == int(chosen.n_transfers):
+            continue
+        try:
+            sol = solve_squad(
+                work,
+                budget_m=budget,
+                captain_min_p_play=captain_min_p_play,
+                season=season,
+                event=event,
+                current_ids=current,
+                max_transfers=k,
+                free_transfers=free_transfers,
+                hit_cost=hit_cost,
+                time_limit=30,
+            )
+        except RuntimeError:
+            continue
+        if sol.n_transfers <= 0:
+            continue
+        note = (
+            "Do this if you only want one move — free transfer, no need to like the rest of the package."
+            if k == 1
+            else "A bigger package. Only better than the single if the extra hit is worth it."
+        )
+        _add(
+            _option_from_solution(
+                current, hold, sol, names, key=f"best_{k}", label=label, note=note
+            )
+        )
+
+    one = next((row for row in menu if row["key"] == "best_1" and row["legal"]), None)
+    if one is None and int(chosen.n_transfers) == 1:
+        one = _option_from_solution(
+            current, hold, chosen, names, key="best_1", label="Best single transfer"
+        )
+    if one and one["legal"]:
+        drop = _id_set(one["transfers_in"])
+        slim = work.loc[
+            ~pd.to_numeric(work["element_id"], errors="coerce").isin(drop)
+            | pd.to_numeric(work["element_id"], errors="coerce").isin(current)
+        ].copy()
+        try:
+            sol = solve_squad(
+                slim,
+                budget_m=budget,
+                captain_min_p_play=captain_min_p_play,
+                season=season,
+                event=event,
+                current_ids=current,
+                max_transfers=1,
+                free_transfers=free_transfers,
+                hit_cost=hit_cost,
+                time_limit=30,
+            )
+            if sol.n_transfers == 1:
+                _add(
+                    _option_from_solution(
+                        current,
+                        hold,
+                        sol,
+                        names,
+                        key="runner_up_1",
+                        label="Next-best single transfer",
+                        note="If you do not like the best single, this is the next legal one-move.",
+                    )
+                )
+        except RuntimeError:
+            pass
+
+    if int(chosen.n_transfers) >= 2:
+        outs = _rows_for_ids(names, current - chosen.squad_ids)
+        ins = _rows_for_ids(names, chosen.squad_ids - current)
+        for i, (left, right) in enumerate(_pair_by_position(outs, ins)):
+            try:
+                out_id = int(left["element_id"])
+                in_id = int(right["element_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            new_ids = (current - {out_id}) | {in_id}
+            out_name = left.get("name") or "out"
+            in_name = right.get("name") or "in"
+            _add(
+                _score_locked_squad(
+                    work,
+                    current,
+                    new_ids,
+                    hold,
+                    budget=budget,
+                    names=names,
+                    free_transfers=free_transfers,
+                    hit_cost=hit_cost,
+                    captain_min_p_play=captain_min_p_play,
+                    season=season,
+                    event=event,
+                    key=f"only_{i}",
+                    label=f"Only {out_name} → {in_name}",
+                    note=(
+                        "This is one half of the headline package, scored as if you ignore the other move. "
+                        "Use it if you like this idea and not the rest."
+                    ),
+                )
+            )
+
+    menu.sort(key=lambda row: (not row["legal"], -float(row["expected_net"])))
+    return menu
 
 
 def realized_xi_points(solution: SquadSolution) -> float | None:
@@ -220,6 +522,22 @@ def solve_transfers(
     recommend = (not wildcard) and chosen.n_transfers > 0 and expected_net > 0.05
     if wildcard:
         recommend = expected_net > 0.05
+    alternatives: list[dict[str, Any]] = []
+    if mode == "myopic":
+        alternatives = build_transfer_menu(
+            work,
+            current,
+            hold,
+            chosen,
+            names,
+            budget=budget,
+            free_transfers=int(free_transfers),
+            max_transfers=int(max_transfers),
+            hit_cost=float(hit_cost),
+            captain_min_p_play=captain_min_p_play,
+            season=season,
+            event=event,
+        )
     return TransferPlan(
         hold=hold,
         chosen=chosen,
@@ -231,6 +549,7 @@ def solve_transfers(
         expected_net=expected_net,
         recommend=recommend,
         mode=mode,
+        alternatives=alternatives,
     )
 
 
@@ -258,6 +577,17 @@ def format_transfer_report(plan: TransferPlan) -> str:
             lines.append(
                 f"  {left.get('name', '-'):<22} {left.get('xpts', 0):5.2f}  ->  "
                 f"{right.get('name', '-'):<22} {right.get('xpts', 0):5.2f}"
+            )
+        lines.append("")
+    if plan.alternatives:
+        lines.append("Other legal ideas (you can take one of these instead of the headline package)")
+        for alt in plan.alternatives:
+            left = ", ".join(str(r.get("name")) for r in alt.get("transfers_out") or []) or "-"
+            right = ", ".join(str(r.get("name")) for r in alt.get("transfers_in") or []) or "-"
+            legal = "" if alt.get("legal", True) else "  ILLEGAL on its own"
+            lines.append(
+                f"  {alt.get('label')}: {left} -> {right}  vs hold {alt.get('expected_net', 0):+.2f}"
+                f"{legal}"
             )
         lines.append("")
     if plan.wildcard is not None and plan.mode != "wildcard":
@@ -292,6 +622,7 @@ def plan_to_dict(plan: TransferPlan) -> dict[str, Any]:
         "wildcard_ev": round(plan.wildcard.objective, 4) if plan.wildcard is not None else None,
         "transfers_out": plan.transfers_out,
         "transfers_in": plan.transfers_in,
+        "alternatives": plan.alternatives,
         "legal": plan.chosen.legal,
         "kill_pass": (plan.hits == 0) or (plan.expected_net > 0),
     }

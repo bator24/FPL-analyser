@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -100,6 +102,29 @@ def render_transfer_plan(
         render_moves_table(plan, catalog)
     elif verdict == "HOLD":
         st.caption("No move beats doing nothing after 4-point hits.")
+    alts = list(getattr(plan, "alternatives", None) or [])
+    if alts:
+        st.markdown("**Other ideas** — pick **one** of these instead of the package")
+        st.caption(
+            "A two-move TAKE is a bundle. If you only like one of them, or the bank is tight, "
+            "use a single below. If a row says it does not fit on its own, the other sale is "
+            "what funds it — you cannot take that half by itself."
+        )
+        html_rows: list[list[str]] = []
+        for alt in alts:
+            left = ", ".join(str(r.get("name") or "?") for r in alt.get("transfers_out") or [])
+            right = ", ".join(str(r.get("name") or "?") for r in alt.get("transfers_in") or [])
+            legal = bool(alt.get("legal", True))
+            html_rows.append(
+                [
+                    html.escape(str(alt.get("label") or "Option")),
+                    html.escape(f"{left} → {right}"),
+                    html.escape(f"{float(alt.get('expected_net') or 0):+.2f}"),
+                    html.escape("yes" if legal else "no — not on its own"),
+                    html.escape(str(int(alt.get("hits") or 0))),
+                ]
+            )
+        render_html_table(["Idea", "Out → in", "vs hold", "Fits?", "Hits"], html_rows)
     st.markdown("**Suggested XI**")
     render_xi_table(plan.chosen, catalog)
 

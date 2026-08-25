@@ -290,6 +290,7 @@ def upcoming_facts_from_chips(chip_result: dict[str, Any]) -> dict[str, Any]:
         "chosen_ev": float(chosen.net_objective),
         "transfers_out": plan.transfers_out,
         "transfers_in": plan.transfers_in,
+        "alternatives": list(getattr(plan, "alternatives", None) or []),
         "captain_hold": cap,
         "captain_after": cap_after,
         "xi": xi_rows,
@@ -320,6 +321,13 @@ def enrich_upcoming(upcoming: dict[str, Any], by_id: dict[int, dict[str, Any]]) 
     out = dict(upcoming)
     out["transfers_out"] = enrich_rows(list(out.get("transfers_out") or []), by_id)
     out["transfers_in"] = enrich_rows(list(out.get("transfers_in") or []), by_id)
+    alts = []
+    for alt in out.get("alternatives") or []:
+        row = dict(alt)
+        row["transfers_out"] = enrich_rows(list(row.get("transfers_out") or []), by_id)
+        row["transfers_in"] = enrich_rows(list(row.get("transfers_in") or []), by_id)
+        alts.append(row)
+    out["alternatives"] = alts
     out["xi"] = enrich_rows(list(out.get("xi") or []), by_id)
     for key in ("captain_hold", "captain_after"):
         row = out.get(key) or {}

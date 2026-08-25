@@ -333,3 +333,95 @@ def test_local_reply_is_honest_when_fixtures_are_kind() -> None:
     text = local_reply(facts, "why sell palmer")
     assert "I would not sell Palmer because of fixtures" in text
     assert "not a fixture punt" in text
+
+
+def test_take_offers_alternatives_and_flags_illegal_half() -> None:
+    upcoming = {
+        "season": "2026-27",
+        "event": 2,
+        "action": "TAKE TRANSFERS",
+        "expected_net": 4.0,
+        "hold_ev": 50.0,
+        "chosen_ev": 54.0,
+        "n_transfers": 2,
+        "hits": 0,
+        "transfers_out": [
+            {
+                "name": "Wilson",
+                "position": "MID",
+                "cost_m": 6.5,
+                "xpts": 2.0,
+                "p_play": 1.0,
+                "team": "WHU",
+            },
+            {
+                "name": "Cheap",
+                "position": "FWD",
+                "cost_m": 5.5,
+                "xpts": 3.6,
+                "p_play": 1.0,
+                "team": "T13",
+            },
+        ],
+        "transfers_in": [
+            {
+                "name": "Gomez",
+                "position": "MID",
+                "cost_m": 5.0,
+                "xpts": 4.5,
+                "p_play": 1.0,
+                "team": "BRI",
+            },
+            {
+                "name": "Upgrade",
+                "position": "FWD",
+                "cost_m": 8.0,
+                "xpts": 9.0,
+                "p_play": 1.0,
+                "team": "T14",
+            },
+        ],
+        "captain_hold": {"name": "Haaland", "xpts": 7.0, "p_play": 1.0},
+        "chip_beats_no_chip": False,
+        "chip_note": "",
+        "alternatives": [
+            {
+                "key": "best_1",
+                "label": "Best single transfer",
+                "n_transfers": 1,
+                "hits": 0,
+                "expected_net": 2.1,
+                "legal": True,
+                "transfers_out": [{"name": "Wilson", "element_id": 1}],
+                "transfers_in": [{"name": "Gomez", "element_id": 2}],
+            },
+            {
+                "key": "only_1",
+                "label": "Only Cheap → Upgrade",
+                "n_transfers": 1,
+                "hits": 0,
+                "expected_net": 0.0,
+                "legal": False,
+                "transfers_out": [{"name": "Cheap", "element_id": 3}],
+                "transfers_in": [{"name": "Upgrade", "element_id": 4}],
+            },
+        ],
+    }
+    text = format_briefing(
+        {
+            "headline": "GW1",
+            "note": "",
+            "players": [],
+            "n_found": 0,
+            "total_points": 0,
+            "did_not_play": [],
+            "blanks": [],
+            "best": None,
+            "missing_ids": [],
+        },
+        upcoming,
+    )
+    assert "pick **one**" in text
+    assert "Best single transfer" in text
+    assert "does not fit on its own" in text
+    assert "Wilson → Gomez" in text

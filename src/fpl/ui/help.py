@@ -19,7 +19,7 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 1. Set **Free transfers** in the sidebar (usually 1).
 2. On **My Team**, build your 15 on the pitch — or type your FPL team ID and **Load picks from FPL**.
 3. Click **Save squad**. It stays disabled until you have 2 GKP / 5 DEF / 5 MID / 3 FWD, **£100.0m or less**, and at most 3 from one club.
-4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits.
+4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits. A two-move TAKE is a bundle — **Other ideas** lists legal singles you can pick instead, and will say if a half does not fit your bank on its own.
 5. Optionally open **Chips**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
 6. Optionally open **Advisor**, generate the briefing, then ask **why that transfer**. The TAKE write-up argues like a conversation: expected points this week, whether they start, form, last match, official flags, and the next five fixtures — and will say if the fixtures do *not* support the sale. No spreadsheet codes. It only uses engine numbers, not Twitter.
 
