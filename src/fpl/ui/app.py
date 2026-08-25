@@ -11,18 +11,22 @@ from fpl.config import load_settings
 from fpl.ingest.pipeline import run_ingest
 from fpl.ingest.history import run_history
 from fpl.models.prior import next_unfinished_event
-from fpl.optimize.chips import format_chip_report, run_chips
+from fpl.optimize.chips import run_chips
 from fpl.optimize.pool import default_season_event
-from fpl.optimize.rules import BUDGET_M, SQUAD_SIZE, normalize_position
-from fpl.optimize.squad import format_squad_report, run_squad
-from fpl.optimize.transfers import (
-    fetch_entry_picks,
-    format_transfer_report,
-    run_transfer,
-)
+from fpl.optimize.rules import SQUAD_SIZE, normalize_position
+from fpl.optimize.squad import run_squad
+from fpl.optimize.transfers import fetch_entry_picks, run_transfer
 from fpl.ui.advisor import render_advisor
+from fpl.ui.chrome import inject_chrome, render_topbar, status_pill
 from fpl.ui.help import HOWTO_BODY, HOWTO_TITLE, SIDEBAR_STEPS
-from fpl.ui.pitch import fill_from_ids, n_filled, render_squad_pitch, spent_m
+from fpl.ui.panels import render_chip_report, render_squad_solution, render_transfer_plan
+from fpl.ui.pitch import (
+    fill_from_ids,
+    flatten_slots,
+    ids_equal,
+    render_squad_pitch,
+    save_blockers,
+)
 
 
 def _settings():
@@ -155,30 +159,19 @@ def _player_catalog_live(settings) -> pd.DataFrame:
     return _finalize_catalog(rows[keep])
 
 
-def _xi_table(solution) -> pd.DataFrame:
-    table = solution.table.copy()
-    table["role"] = "Bench"
-    table.loc[table["in_xi"], "role"] = "XI"
-    table.loc[table["is_captain"], "role"] = "Captain"
-    table.loc[table["is_vice"], "role"] = "Vice"
-    cols = [c for c in ["role", "position", "name", "cost_m", "xpts", "p_play"] if c in table.columns]
-    return table[cols]
+def _need_saved_15() -> bool:
+    return len(_read_squad_ids(_squad_path())) != SQUAD_SIZE
 
 
 def main() -> None:
-    st.set_page_config(page_title="FPL analyser", layout="wide")
-    st.title("FPL analyser")
-    st.caption("Expected points for your 15 this gameweek. Local engine — nothing is uploaded unless you set OPENAI_API_KEY for the advisor.")
-
-    with st.expander(HOWTO_TITLE, expanded=True):
-        st.markdown(HOWTO_BODY)
+    st.set_page_config(page_title="FPL analyser", layout="wide", initial_sidebar_state="expanded")
+    inject_chrome()
 
     cfg = _settings()
     panel = _load_panel()
     live_players = (cfg.processed_dir / "players.parquet").exists()
     live_fixtures = (cfg.processed_dir / "fixtures.parquet").exists()
     if panel is None:
-        st.error("No player_gw.parquet yet. Use the sidebar: **Refresh data** → History.")
         seasons: list[str] = []
         default_season, default_event = cfg.current_season, 1
     else:
@@ -197,19 +190,6 @@ def main() -> None:
                 default_event = next_unfinished_event(pd.read_parquet(fixtures_path), events)
             except RuntimeError:
                 pass
-
-    if live_players:
-        st.info(
-            f"Upcoming {cfg.current_season}: xPts uses last completed PL form (mapped by FPL code) "
-            "plus this year's prices, fixtures, and official FPL availability. "
-            "It is not cup/friendly form and not a news scrape. "
-            "**Rebuild 15** is the balanced EV squad."
-        )
-    elif panel is not None and cfg.current_season not in seasons:
-        st.warning(
-            "No live FPL snapshot yet. Run **Ingest FPL snapshot** so squad/transfer can score "
-            "the upcoming gameweek instead of last season."
-        )
 
     with st.sidebar:
         st.header("This week")
@@ -246,18 +226,8 @@ def main() -> None:
     else:
         catalog = _player_catalog(panel, season) if panel is not None else pd.DataFrame()
 
-    st.subheader("1. Your 15")
-    st.caption(
-        "Click a shirt to select it, **Remove** under the shirt to take them off. "
-        "Type a name in **Search** (works even before you click a shirt). "
-        "Then **Place on pitch** and **Save squad** (2/5/5/3, ≤ £100m, max 3 per club). Or load your FPL team ID below."
-    )
     saved_ids = _read_squad_ids(_squad_path())
     valid_ids = set(catalog["element_id"].tolist()) if not catalog.empty else set()
-    missing = [i for i in saved_ids if i not in valid_ids]
-    if missing:
-        st.info(f"Saved IDs not in {season} catalog (kept on disk): {missing}")
-
     catalog_key = str(season)
     if st.session_state.get("squad_catalog_key") != catalog_key or "squad_slots" not in st.session_state:
         st.session_state.squad_slots = fill_from_ids(saved_ids, catalog)
@@ -267,111 +237,201 @@ def main() -> None:
         for pos, ids in st.session_state.squad_slots.items():
             st.session_state.squad_slots[pos] = [eid if eid in valid_ids else None for eid in ids]
 
+    picked_ids = flatten_slots(st.session_state.squad_slots)
+    dirty = not ids_equal(picked_ids, saved_ids)
+    if len(saved_ids) == SQUAD_SIZE and not dirty:
+        pill = status_pill("ok", "saved on disk")
+    elif dirty:
+        pill = status_pill("warn", "unsaved changes")
+    else:
+        pill = status_pill("mute", "no squad saved")
+    render_topbar(season=str(season), event=int(event), status_html=pill)
+    st.caption(
+        "Local expected points for **your 15 this gameweek**. "
+        "Save writes `data/overrides/squad.csv` on this machine — not FPL, not the cloud. "
+        "Nothing is uploaded unless you set OPENAI_API_KEY for the advisor."
+    )
+
+    with st.expander(HOWTO_TITLE, expanded=False):
+        st.markdown(HOWTO_BODY)
+
+    if panel is None:
+        st.error("No player_gw.parquet yet. Sidebar → **Rebuild history panel**.")
+    if live_players:
+        st.caption(
+            f"Upcoming {cfg.current_season}: xPts uses last completed PL form (mapped by FPL code) "
+            "plus this year's prices, fixtures, and official FPL availability — not cup/friendly form, not a news scrape."
+        )
+    elif panel is not None and cfg.current_season not in seasons:
+        st.warning(
+            "No live FPL snapshot yet. Run **Ingest FPL snapshot** so squad/transfer can score "
+            "the upcoming gameweek instead of last season."
+        )
+
+    team_tab, xfer_tab, chip_tab, wild_tab, advisor_tab = st.tabs(
+        ["My Team", "Transfers", "Chips", "Wildcard 15", "Advisor"]
+    )
+
+    with team_tab:
+        _render_my_team(
+            catalog=catalog,
+            season=str(season),
+            event=int(event),
+            saved_ids=saved_ids,
+            valid_ids=valid_ids,
+            dirty=dirty,
+        )
+
+    with xfer_tab:
+        _render_transfers_tab(season=str(season), event=int(event), free_transfers=int(free_transfers))
+
+    with chip_tab:
+        _render_chips_tab(season=str(season), event=int(event), free_transfers=int(free_transfers))
+
+    with wild_tab:
+        _render_wildcard_tab(season=str(season), event=int(event))
+
+    with advisor_tab:
+        # Prefer the pitch if it is a full 15; otherwise the last file on disk.
+        live_ids = flatten_slots(st.session_state.get("squad_slots", {}))
+        brief_ids = live_ids if len(set(live_ids)) == SQUAD_SIZE else saved_ids
+        render_advisor(
+            season=str(season),
+            event=int(event),
+            free_transfers=int(free_transfers),
+            squad_ids=brief_ids,
+        )
+
+
+def _render_my_team(
+    *,
+    catalog: pd.DataFrame,
+    season: str,
+    event: int,
+    saved_ids: list[int],
+    valid_ids: set[int],
+    dirty: bool,
+) -> None:
+    missing = [i for i in saved_ids if i not in valid_ids]
+    if missing:
+        st.info(f"Saved IDs not in {season} catalog (kept on disk): {missing}")
+
     if catalog.empty:
         st.warning("No player catalog for this season. Run ingest / history first.")
-        picked_ids: list[int] = []
-    else:
-        picked_ids = render_squad_pitch(catalog)
+        return
 
-    col_save, col_fpl, col_id = st.columns([1, 1, 2])
-    with col_save:
-        can_save = (
-            n_filled(st.session_state.get("squad_slots", {})) == SQUAD_SIZE
-            and spent_m(st.session_state.get("squad_slots", {}), catalog) <= BUDGET_M + 1e-9
-        )
+    picked_ids = render_squad_pitch(catalog)
+    blockers = save_blockers(st.session_state.get("squad_slots", {}), catalog)
+    can_save = not blockers
+
+    left, right = st.columns([1.2, 1.1])
+    with left:
+        if len(saved_ids) == SQUAD_SIZE and not dirty:
+            st.success(f"This 15 is saved at `{_squad_path()}`. Restarting the app keeps it.")
+        elif dirty:
+            st.warning("Pitch differs from the file on disk. **Save squad** or those shirts are only in this browser session.")
+        else:
+            st.info(
+                f"Save writes `{_squad_path()}` (15 `element_id`s). "
+                "That file is what Transfers / Chips / the CLI read. Closing the tab does not upload anything to FPL."
+            )
+        if blockers:
+            st.caption("Save unlocks at 2/5/5/3, ≤ £100.0m, max 3 per club. Now: " + "; ".join(blockers))
         if st.button("Save squad", type="primary", disabled=not can_save):
             _write_squad_ids(_squad_path(), picked_ids)
-            st.success(f"Wrote {_squad_path()}")
-    with col_fpl:
-        team_id = st.number_input("FPL team ID (optional)", min_value=0, value=0, step=1)
-    with col_id:
-        if st.button("Load picks from FPL", disabled=int(team_id) <= 0 or catalog.empty):
+            st.rerun()
+    with right:
+        st.markdown("**Load from FPL**")
+        st.caption("Public entry ID from `fantasy.premierleague.com/entry/…` — not a login.")
+        team_id = st.number_input("FPL team ID", min_value=0, value=0, step=1)
+        if st.button("Load picks from FPL", disabled=int(team_id) <= 0):
             try:
                 ids, bank = fetch_entry_picks(int(team_id), int(event), settings=_settings())
                 st.session_state.squad_slots = fill_from_ids(ids, catalog)
                 _write_squad_ids(_squad_path(), [i for i in ids if i in valid_ids][:SQUAD_SIZE])
-                st.success(f"Loaded {len(ids)} picks (bank £{bank:.1f}m).")
+                st.success(f"Loaded {len(ids)} picks (bank £{bank:.1f}m) and saved to disk.")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
 
-    st.subheader("2. Run")
+    last = st.session_state.get("last_transfer_plan")
+    if last is not None:
+        st.divider()
+        st.markdown("**Last transfer score** (Transfers tab)")
+        render_transfer_plan(last, note=st.session_state.get("last_transfer_note"))
+
+
+def _render_transfers_tab(*, season: str, event: int, free_transfers: int) -> None:
     st.caption(
-        "**Transfers** needs a saved 15 and answers TAKE vs HOLD. **Chip EV** does not play a chip. "
-        "**Rebuild 15** is a wildcard-shaped team from scratch, not an edit of yours."
+        "TAKE vs HOLD for the **saved** 15, after 4-point hits. "
+        "This is expected points, not mini-league rank and not a 0–100 team rating."
     )
-    c1, c2, c3 = st.columns(3)
-    report_box = st.empty()
-    table_box = st.empty()
-
-    def _show_text(text: str) -> None:
-        report_box.code(text, language=None)
-
-    with c1:
-        if st.button("Recommend transfers", help="Hold vs 0–3 moves. Needs a saved 15."):
-            if len(_read_squad_ids(_squad_path())) != SQUAD_SIZE:
-                st.error("Save 15 players first.")
-            else:
-                with st.spinner("Solving transfers…"):
-                    try:
-                        result = run_transfer(
-                            season=str(season),
-                            event=int(event),
-                            squad_path=_squad_path(),
-                            free_transfers=int(free_transfers),
-                        )
-                        text = format_transfer_report(result["plan"])
-                        if result.get("note"):
-                            text = result["note"] + "\n\n" + text
-                        _show_text(text)
-                        table_box.dataframe(_xi_table(result["plan"].chosen), hide_index=True)
-                    except Exception as exc:
-                        st.error(str(exc))
-    with c2:
-        if st.button("Chip EV", help="This-GW BB / TC / FH / WC. Does not auto-play a chip."):
-            if len(_read_squad_ids(_squad_path())) != SQUAD_SIZE:
-                st.error("Save 15 players first.")
-            else:
-                with st.spinner("Scoring chips…"):
-                    try:
-                        result = run_chips(
-                            season=str(season),
-                            event=int(event),
-                            squad_path=_squad_path(),
-                            free_transfers=int(free_transfers),
-                        )
-                        text = format_chip_report(result["report"])
-                        if result.get("note"):
-                            text = result["note"] + "\n\n" + text
-                        _show_text(text)
-                        table_box.dataframe(_xi_table(result["plan"].chosen), hide_index=True)
-                    except Exception as exc:
-                        st.error(str(exc))
-    with c3:
-        if st.button("Rebuild 15 from scratch", help="Wildcard-shaped squad. Ignores your current 15."):
-            with st.spinner("Solving squad…"):
+    if st.button("Score transfers", type="primary"):
+        if _need_saved_15():
+            st.error("Save a legal 15 on My Team first.")
+        else:
+            with st.spinner("Solving transfers…"):
                 try:
-                    result = run_squad(season=str(season), event=int(event))
-                    text = format_squad_report(result["solution"])
-                    if result.get("note"):
-                        text = result["note"] + "\n\n" + text
-                    _show_text(text)
-                    table_box.dataframe(_xi_table(result["solution"]), hide_index=True)
+                    result = run_transfer(
+                        season=str(season),
+                        event=int(event),
+                        squad_path=_squad_path(),
+                        free_transfers=int(free_transfers),
+                    )
+                    st.session_state.last_transfer_plan = result["plan"]
+                    st.session_state.last_transfer_note = result.get("note")
                 except Exception as exc:
                     st.error(str(exc))
+                    return
+    plan = st.session_state.get("last_transfer_plan")
+    if plan is None:
+        st.info("Save your 15, then score. Recommendation uses the file on disk, not unsaved shirts.")
+        return
+    render_transfer_plan(plan, note=st.session_state.get("last_transfer_note"))
 
-    st.caption(
-        "TAKE/HOLD is expected net vs doing nothing, after 4-point hits. "
-        "A starred chip on the chip report is this-GW arithmetic — do not blindly triple a one-week spike."
-    )
 
-    brief_ids = picked_ids if len(set(picked_ids)) == SQUAD_SIZE else saved_ids
-    render_advisor(
-        season=str(season),
-        event=int(event),
-        free_transfers=int(free_transfers),
-        squad_ids=brief_ids,
-    )
+def _render_chips_tab(*, season: str, event: int, free_transfers: int) -> None:
+    st.caption("This-GW EV only. Does **not** play a chip. A starred line is arithmetic, not an instruction.")
+    if st.button("Score chips", type="primary"):
+        if _need_saved_15():
+            st.error("Save a legal 15 on My Team first.")
+        else:
+            with st.spinner("Scoring chips…"):
+                try:
+                    result = run_chips(
+                        season=str(season),
+                        event=int(event),
+                        squad_path=_squad_path(),
+                        free_transfers=int(free_transfers),
+                    )
+                    st.session_state.last_chip_report = result["report"]
+                    st.session_state.last_chip_note = result.get("note")
+                except Exception as exc:
+                    st.error(str(exc))
+                    return
+    report = st.session_state.get("last_chip_report")
+    if report is None:
+        st.info("Save your 15 on My Team, then score chips here.")
+        return
+    render_chip_report(report, note=st.session_state.get("last_chip_note"))
+
+
+def _render_wildcard_tab(*, season: str, event: int) -> None:
+    st.caption("Rebuilds a legal 15 from scratch. Ignores your current team — wildcard-shaped comparison, not an edit.")
+    if st.button("Rebuild 15 from scratch", type="primary"):
+        with st.spinner("Solving squad…"):
+            try:
+                result = run_squad(season=str(season), event=int(event))
+                st.session_state.last_squad_solution = result["solution"]
+                st.session_state.last_squad_note = result.get("note")
+            except Exception as exc:
+                st.error(str(exc))
+                return
+    solution = st.session_state.get("last_squad_solution")
+    if solution is None:
+        st.info("Run this when you want a from-scratch EV 15 to compare against yours.")
+        return
+    render_squad_solution(solution, note=st.session_state.get("last_squad_note"))
 
 
 if __name__ == "__main__":

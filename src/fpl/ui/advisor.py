@@ -16,9 +16,8 @@ def render_advisor(
     free_transfers: int,
     squad_ids: list[int],
 ) -> None:
-    st.subheader("3. Advisor")
     st.caption(
-        "Generate a last-GW recap plus this week's HOLD/TAKE and captain (same engine as section 2). "
+        "Generate a last-GW recap plus this week's HOLD/TAKE and captain (same engine as **Transfers**). "
         "Then ask why. Full click-order is in **How to use this app** at the top."
     )
     ready = len({int(i) for i in squad_ids}) == SQUAD_SIZE

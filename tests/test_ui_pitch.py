@@ -5,7 +5,9 @@ from fpl.ui.pitch import (
     fill_from_ids,
     filter_candidates,
     flatten_slots,
+    ids_equal,
     n_filled,
+    save_blockers,
     spent_m,
     would_break_club_cap,
 )
@@ -115,3 +117,28 @@ def test_spent_and_flatten() -> None:
     slots = fill_from_ids(cat.loc[cat["position"] == "GKP", "element_id"].head(2).tolist(), cat)
     assert flatten_slots(slots) == slots["GKP"]
     assert spent_m(slots, cat) == round(float(cat.loc[cat["element_id"].isin(slots["GKP"]), "cost_m"].sum()), 1)
+
+
+def test_ids_equal_ignores_order() -> None:
+    assert ids_equal([3, 1, 2], [1, 2, 3])
+    assert not ids_equal([1, 2], [1, 2, 3])
+
+
+def test_save_blockers_need_full_legal_15() -> None:
+    cat = _catalog()
+    empty = empty_slots()
+    assert any("15" in reason for reason in save_blockers(empty, cat))
+    slots = empty_slots()
+    slots["MID"] = [1, 2, 3, 4, None]
+    four_same = pd.DataFrame(
+        {
+            "element_id": [1, 2, 3, 4],
+            "name": list("ABCD"),
+            "position": ["MID"] * 4,
+            "team": ["ARS"] * 4,
+            "team_id": [1, 1, 1, 1],
+            "cost_m": [5.0, 5.0, 5.0, 5.0],
+            "points": [10, 10, 10, 10],
+        }
+    )
+    assert any("club" in reason for reason in save_blockers(slots, four_same))

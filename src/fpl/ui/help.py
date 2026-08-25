@@ -5,6 +5,8 @@ HOWTO_TITLE = "How to use this app"
 HOWTO_BODY = """
 This is a local expected-points tool for **your 15 this gameweek**. It does not log into FPL for you, does not play chips, and does not scrape news.
 
+**Save squad** writes `data/overrides/squad.csv` on this computer. That file survives closing the browser and restarting Streamlit. Unsaved shirts live only in this session. Nothing is sent to FPL.
+
 ### First time (or after a long break)
 
 1. Open the **left sidebar**.
@@ -15,13 +17,13 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 ### Every week (the actual loop)
 
 1. Set **Free transfers** in the sidebar (usually 1).
-2. Build **your 15** on the green pitch — or type your FPL team ID and **Load picks from FPL**.
+2. On **My Team**, build your 15 on the pitch — or type your FPL team ID and **Load picks from FPL**.
 3. Click **Save squad**. It stays disabled until you have 2 GKP / 5 DEF / 5 MID / 3 FWD, **£100.0m or less**, and at most 3 from one club.
-4. Click **Recommend transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits.
-5. Optionally click **Chip EV**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
-6. Optionally click **Generate this week's briefing**, then ask the advisor why (captain, last GW, that transfer). It only uses engine numbers, not Twitter.
+4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits.
+5. Optionally open **Chips**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
+6. Optionally open **Advisor**, generate the briefing, then ask why. It only uses engine numbers, not Twitter.
 
-**Rebuild 15 from scratch** ignores your team. Use it as a wildcard-shaped comparison, not as “my squad”.
+**Wildcard 15** ignores your team. Use it as a comparison, not as “my squad”.
 
 ### Pitch
 
@@ -41,8 +43,8 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 SIDEBAR_STEPS = """
 1. Ingest (if prices look stale)  
 2. Set free transfers  
-3. Pitch → Save squad  
-4. Recommend transfers  
-5. Chip EV if you might play a chip  
-6. Advisor briefing to talk it through
+3. My Team → Save squad  
+4. Transfers → TAKE vs HOLD  
+5. Chips if you might play a chip  
+6. Advisor to talk it through
 """

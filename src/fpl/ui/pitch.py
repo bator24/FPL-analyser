@@ -145,6 +145,25 @@ def spent_m(slots: dict[str, list[int | None]], catalog: pd.DataFrame) -> float:
     return round(total, 1)
 
 
+def ids_equal(left: list[int], right: list[int]) -> bool:
+    return sorted(int(x) for x in left) == sorted(int(x) for x in right)
+
+
+def save_blockers(slots: dict[str, list[int | None]], catalog: pd.DataFrame) -> list[str]:
+    reasons: list[str] = []
+    filled = n_filled(slots)
+    if filled != SQUAD_SIZE:
+        reasons.append(f"{filled}/{SQUAD_SIZE} selected")
+    spent = spent_m(slots, catalog)
+    if spent > BUDGET_M + 1e-9:
+        reasons.append(f"£{spent:.1f}m / £{BUDGET_M:.1f}m")
+    over = club_counts(slots, catalog)
+    over = over[over > MAX_PER_CLUB]
+    if not over.empty:
+        reasons.append(f"more than {MAX_PER_CLUB} from one club")
+    return reasons
+
+
 def club_counts(slots: dict[str, list[int | None]], catalog: pd.DataFrame) -> pd.Series:
     names: list[str] = []
     for eid in flatten_slots(slots):
