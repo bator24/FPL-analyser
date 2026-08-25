@@ -9,7 +9,7 @@ import pandas as pd
 
 from fpl.config import Settings, load_settings
 from fpl.models.prior import ensure_code_map, panel_has_gameweek, prior_season_key
-from fpl.optimize.chips import run_chips
+from fpl.optimize.chips import format_chip_report, run_chips
 from fpl.optimize.rules import SQUAD_SIZE, normalize_position
 from fpl.optimize.transfers import format_transfer_report
 

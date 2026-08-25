@@ -1,7 +1,13 @@
 import pandas as pd
 
+from fpl.advisor import briefing as briefing_mod
 from fpl.advisor.briefing import format_briefing, last_finished_event, recap_from_panel
 from fpl.advisor.chat import local_reply
+
+
+def test_briefing_imports_chip_formatters() -> None:
+    assert callable(briefing_mod.format_chip_report)
+    assert callable(briefing_mod.run_chips)
 
 
 def test_last_finished_event() -> None:
