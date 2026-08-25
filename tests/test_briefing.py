@@ -107,3 +107,160 @@ def test_local_reply_routes_captain_and_hold() -> None:
     assert "Salah" in last or "GW38" in last
     named = local_reply(facts, "tell me about Mbeumo")
     assert "7.14" in named
+
+
+def test_local_reply_explains_why_player_is_out() -> None:
+    facts = {
+        "recap": {
+            "players": [{"name": "Wilson", "points": 2, "minutes": 65, "position": "MID"}],
+        },
+        "upcoming": {
+            "action": "TAKE TRANSFERS",
+            "expected_net": 7.88,
+            "hold_ev": 53.41,
+            "chosen_ev": 61.29,
+            "n_transfers": 2,
+            "hits": 1,
+            "transfers_out": [
+                {
+                    "name": "Anderson",
+                    "position": "MID",
+                    "cost_m": 5.5,
+                    "xpts": 2.10,
+                    "p_play": 0.75,
+                    "team": "NFO",
+                    "form": 2.0,
+                    "this_gw": "GW2 BUR (H) FDR2",
+                    "next_5_text": "GW2 BUR (H) FDR2, GW3 BOU (A) FDR2",
+                    "next_5_short": "BUR(H)2 · BOU(A)2",
+                    "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 2 at FDR 4+).",
+                    "next_fdr": 2,
+                },
+                {
+                    "name": "Wilson",
+                    "position": "MID",
+                    "cost_m": 6.5,
+                    "xpts": 1.98,
+                    "p_play": 1.0,
+                    "team": "WHU",
+                    "form": 1.2,
+                    "this_gw": "GW2 CHE (A) FDR5",
+                    "next_5_text": "GW2 CHE (A) FDR5, GW3 BUR (H) FDR2, GW4 ARS (A) FDR4, GW5 BOU (H) FDR2, GW6 MCI (A) FDR5",
+                    "next_5_short": "CHE(A)5 · BUR(H)2 · ARS(A)4 · BOU(H)2 · MCI(A)5",
+                    "fixture_verdict": "Hard fixture ahead (next FDR 5). Hard run (3 of 5 at FDR 4+; mean 3.6).",
+                    "next_fdr": 5,
+                    "hard_n": 3,
+                    "fdr_mean": 3.6,
+                },
+            ],
+            "transfers_in": [
+                {
+                    "name": "Mbeumo",
+                    "position": "MID",
+                    "cost_m": 8.0,
+                    "xpts": 8.20,
+                    "p_play": 1.0,
+                    "team": "MUN",
+                    "form": 8.0,
+                    "this_gw": "GW2 FUL (H) FDR2",
+                    "next_5_text": "GW2 FUL (H) FDR2, GW3 BUR (A) FDR2",
+                    "next_5_short": "FUL(H)2 · BUR(A)2",
+                    "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 2 at FDR 4+).",
+                    "next_fdr": 2,
+                },
+                {
+                    "name": "Gomez",
+                    "position": "MID",
+                    "cost_m": 5.0,
+                    "xpts": 4.50,
+                    "p_play": 1.0,
+                    "team": "BRI",
+                    "form": 4.0,
+                    "this_gw": "GW2 WOL (H) FDR2",
+                    "next_5_text": "GW2 WOL (H) FDR2, GW3 EVE (A) FDR2",
+                    "next_5_short": "WOL(H)2 · EVE(A)2",
+                    "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 2 at FDR 4+).",
+                    "next_fdr": 2,
+                },
+            ],
+            "captain_hold": {"name": "Haaland", "xpts": 7.0, "p_play": 1.0},
+            "xi": [],
+            "chip_beats_no_chip": False,
+            "best_no_chip": "transfers",
+            "chip_note": "this-GW only",
+            "engine_note": "",
+        },
+        "flags": [
+            {
+                "name": "Anderson",
+                "status": "d",
+                "news": "Knock - 75% chance of playing",
+                "chance_of_playing_next_round": 75.0,
+            }
+        ],
+    }
+    text = local_reply(facts, "why do you want to transfer out wilson")
+    assert "Wilson" in text
+    assert "1.98" in text
+    assert "TAKE" in text
+    assert "this is the one you asked about" in text
+    assert "Hard fixture ahead" in text
+    assert "CHE (A) FDR5" in text
+    assert "FPL form" in text
+    assert "Last recap for Wilson" in text
+    assert "Fixture run supports selling Wilson" in text
+    assert "Knock" in local_reply(facts, "why anderson")
+
+
+def test_local_reply_is_honest_when_fixtures_are_kind() -> None:
+    facts = {
+        "recap": {"players": []},
+        "upcoming": {
+            "action": "TAKE TRANSFERS",
+            "expected_net": 1.2,
+            "hold_ev": 50.0,
+            "chosen_ev": 51.2,
+            "n_transfers": 1,
+            "hits": 0,
+            "transfers_out": [
+                {
+                    "name": "Palmer",
+                    "position": "MID",
+                    "cost_m": 10.5,
+                    "xpts": 4.0,
+                    "p_play": 1.0,
+                    "team": "CHE",
+                    "form": 5.0,
+                    "this_gw": "GW2 BUR (H) FDR2",
+                    "next_5_text": "GW2 BUR (H) FDR2, GW3 WOL (A) FDR2",
+                    "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 2 at FDR 4+).",
+                    "next_fdr": 2,
+                }
+            ],
+            "transfers_in": [
+                {
+                    "name": "Saka",
+                    "position": "MID",
+                    "cost_m": 10.0,
+                    "xpts": 5.5,
+                    "p_play": 1.0,
+                    "team": "ARS",
+                    "form": 6.0,
+                    "this_gw": "GW2 MCI (A) FDR5",
+                    "next_5_text": "GW2 MCI (A) FDR5, GW3 LIV (H) FDR4",
+                    "fixture_verdict": "Hard fixture ahead (next FDR 5). Hard run (2 of 2 at FDR 4+; mean 4.5).",
+                    "next_fdr": 5,
+                }
+            ],
+            "captain_hold": {"name": "Haaland", "xpts": 7.0, "p_play": 1.0},
+            "xi": [],
+            "chip_beats_no_chip": False,
+            "best_no_chip": "transfers",
+            "chip_note": "this-GW only",
+            "engine_note": "",
+        },
+        "flags": [],
+    }
+    text = local_reply(facts, "why sell palmer")
+    assert "Fixtures argue against selling Palmer" in text
+    assert "not a fixture punt" in text

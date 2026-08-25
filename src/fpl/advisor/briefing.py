@@ -7,7 +7,9 @@ from typing import Any
 
 import pandas as pd
 
+from fpl.advisor.chat import _pair_moves
 from fpl.config import Settings, load_settings
+from fpl.models.horizon import enrich_rows, load_player_context, merge_context
 from fpl.models.prior import ensure_code_map, panel_has_gameweek, prior_season_key
 from fpl.optimize.chips import format_chip_report, run_chips
 from fpl.optimize.rules import SQUAD_SIZE, normalize_position
@@ -259,13 +261,16 @@ def upcoming_facts_from_chips(chip_result: dict[str, Any]) -> dict[str, Any]:
     xi = hold.table.loc[hold.table["in_xi"]].copy()
     xi_rows = []
     for _, row in xi.iterrows():
+        cost = row.get("cost_m")
         xi_rows.append(
             {
+                "element_id": int(row["element_id"]),
                 "name": str(row.get("name")),
                 "position": str(row.get("position")),
                 "xpts": float(row["xpts"]),
                 "p_play": float(row["p_play"]),
                 "captain": bool(row.get("is_captain")),
+                "cost_m": None if pd.isna(cost) else float(cost),
             }
         )
     xi_rows.sort(key=lambda r: -r["xpts"])
@@ -302,6 +307,42 @@ def upcoming_facts_from_chips(chip_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _eid(row: dict[str, Any] | None) -> int | None:
+    if not row:
+        return None
+    try:
+        return int(row["element_id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def enrich_upcoming(upcoming: dict[str, Any], by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    out = dict(upcoming)
+    out["transfers_out"] = enrich_rows(list(out.get("transfers_out") or []), by_id)
+    out["transfers_in"] = enrich_rows(list(out.get("transfers_in") or []), by_id)
+    out["xi"] = enrich_rows(list(out.get("xi") or []), by_id)
+    for key in ("captain_hold", "captain_after"):
+        row = out.get(key) or {}
+        eid = _eid(row)
+        out[key] = merge_context(row, by_id.get(eid) if eid is not None else None)
+    return out
+
+
+def enrich_recap(recap: dict[str, Any], by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    out = dict(recap)
+    out["players"] = enrich_rows(list(out.get("players") or []), by_id)
+    return out
+
+
+def roster_from_ids(ids: list[int], by_id: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw in ids:
+        eid = int(raw)
+        ctx = by_id.get(eid, {"element_id": eid})
+        rows.append(dict(ctx))
+    return rows
+
+
 def format_briefing(
     recap: dict[str, Any],
     upcoming: dict[str, Any] | None,
@@ -329,10 +370,17 @@ def format_briefing(
         elif recap.get("blanks"):
             lines.append("Blanks (0 pts): " + ", ".join(recap["blanks"]) + ".")
         lines.append("")
-        lines.append("| Player | Pos | Min | Pts |")
-        lines.append("|---|---|---:|---:|")
+        lines.append("| Player | Pos | Club | Min | Pts | Form | Next 5 |")
+        lines.append("|---|---|---|---:|---:|---:|---|")
         for p in recap["players"]:
-            lines.append(f"| {p['name']} | {p['position']} | {p['minutes']:.0f} | {p['points']:.0f} |")
+            form = p.get("form")
+            form_s = f"{float(form):.1f}" if isinstance(form, (int, float)) else "—"
+            nxt = p.get("next_5_short") or "—"
+            club = p.get("team") or "—"
+            lines.append(
+                f"| {p['name']} | {p['position']} | {club} | {p['minutes']:.0f} | "
+                f"{p['points']:.0f} | {form_s} | {nxt} |"
+            )
     else:
         lines.append("No recap rows available for this 15.")
     if recap.get("missing_ids"):
@@ -356,6 +404,36 @@ def format_briefing(
         lines.append(
             f"**TAKE TRANSFERS** ({upcoming['n_transfers']} moves, {hit}): {outs} → {ins}. {why_hold}"
         )
+        lines.append("")
+        lines.append("| Out | Club | Form | Next 5 | xPts | In | Club | Form | Next 5 | xPts | Δ |")
+        lines.append("|---|---|---:|---|---:|---|---|---:|---|---:|---:|")
+        for left, right in _pair_moves(upcoming.get("transfers_out") or [], upcoming.get("transfers_in") or []):
+            lx = float(left.get("xpts") or 0)
+            rx = float(right.get("xpts") or 0)
+            lf = left.get("form")
+            rf = right.get("form")
+            lf_s = f"{float(lf):.1f}" if isinstance(lf, (int, float)) else "—"
+            rf_s = f"{float(rf):.1f}" if isinstance(rf, (int, float)) else "—"
+            lines.append(
+                f"| {left.get('name', '—')} | {left.get('team') or '—'} | {lf_s} | "
+                f"{left.get('next_5_short') or '—'} | {lx:.2f} | "
+                f"{right.get('name', '—')} | {right.get('team') or '—'} | {rf_s} | "
+                f"{right.get('next_5_short') or '—'} | {rx:.2f} | {rx - lx:+.2f} |"
+            )
+        for left, right in _pair_moves(upcoming.get("transfers_out") or [], upcoming.get("transfers_in") or []):
+            bits = []
+            if left.get("this_gw") or left.get("fixture_verdict"):
+                bits.append(
+                    f"{left.get('name')}: {left.get('this_gw') or ''} "
+                    f"{left.get('fixture_verdict') or ''}".strip()
+                )
+            if right.get("this_gw") or right.get("fixture_verdict"):
+                bits.append(
+                    f"{right.get('name')}: {right.get('this_gw') or ''} "
+                    f"{right.get('fixture_verdict') or ''}".strip()
+                )
+            if bits:
+                lines.append("- " + " | ".join(bits))
     cap = upcoming["captain_hold"]
     lines.append(
         f"**Captain:** {cap['name']} (xPts {cap['xpts']:.2f}, p_play {cap['p_play']:.2f}). "
@@ -442,6 +520,10 @@ def build_weekly_briefing(
         current_season=str(upcoming["season"] or cfg.current_season),
         upcoming_event=int(upcoming["event"] or 1),
     )
+    by_id = load_player_context(cfg, from_event=int(upcoming["event"] or 1))
+    upcoming = enrich_upcoming(upcoming, by_id)
+    recap = enrich_recap(recap, by_id)
+    roster = roster_from_ids(ids, by_id)
     players_path = cfg.processed_dir / "players.parquet"
     flags = (
         squad_flags(pd.read_parquet(players_path), ids) if players_path.exists() else []
@@ -452,6 +534,7 @@ def build_weekly_briefing(
         "upcoming": upcoming,
         "flags": flags,
         "squad_ids": ids,
+        "roster": roster,
     }
     return {
         "markdown": markdown,

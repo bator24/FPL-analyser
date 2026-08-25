@@ -21,13 +21,14 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 3. Click **Save squad**. It stays disabled until you have 2 GKP / 5 DEF / 5 MID / 3 FWD, **£100.0m or less**, and at most 3 from one club.
 4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits.
 5. Optionally open **Chips**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
-6. Optionally open **Advisor**, generate the briefing, then ask why. It only uses engine numbers, not Twitter.
+6. Optionally open **Advisor**, generate the briefing, then ask **why that transfer**. The engine dumps the sale case: this-GW xPts, p_play, official FPL form, last recap, flags, and next-5 FDR (and will say if fixtures do *not* support the sale). It only uses engine numbers, not Twitter.
 
 **Wildcard 15** ignores your team. Use it as a comparison, not as “my squad”.
 
 ### Pitch
 
-- Click **Remove** under a filled shirt (or **Remove {name}** in the picker) to take them off. Clicking the shirt only selects it to replace.
+- Click **Remove** under a filled shirt (or **Remove {name}** in the picker) to take them off. Clicking the shirt only selects it to replace. Hover a filled shirt for club, value, FPL form, and next 5 fixtures (official FDR, 5=hardest).
+- Player tables (picker, Transfers XI, out→in) use the same hover card. Next 5 is also a visible column.
 - **Type a name in Search** (Salah, Fernandes, …). That box searches first/last/`web_name`, not the shirt you clicked. The **Choose** dropdown is also type-to-filter by those labels.
 - Filter further by club, price, total points; sort as you like.
 - Early in the season, **Pts** are often 0 — sort by price or form instead.

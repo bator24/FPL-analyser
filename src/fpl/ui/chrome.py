@@ -56,6 +56,59 @@ footer { visibility: hidden; }
 }
 .fpl-verdict-take { color: #00ff87; }
 .fpl-verdict-hold { color: #e4e4e7; }
+.fpl-hover-wrap {
+  overflow: visible;
+  margin: 0.2rem 0 0.6rem 0;
+}
+.fpl-hover-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  color: #e4e4e7;
+}
+.fpl-hover-table th {
+  text-align: left;
+  color: #a1a1aa;
+  font-weight: 650;
+  padding: 0.32rem 0.45rem;
+  border-bottom: 1px solid #3f3f46;
+  white-space: nowrap;
+}
+.fpl-hover-table td {
+  padding: 0.32rem 0.45rem;
+  border-bottom: 1px solid #27272a;
+  vertical-align: top;
+}
+.fpl-name {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted #a1a1aa;
+  font-weight: 650;
+  color: #fafafa;
+}
+.fpl-name .fpl-tip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 250px;
+  max-width: 360px;
+  background: #18181b;
+  border: 1px solid #52525b;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+  color: #f4f4f5;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.fpl-name:hover .fpl-tip,
+.fpl-name:focus .fpl-tip {
+  display: block;
+}
 </style>
 """
 

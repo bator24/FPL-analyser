@@ -10,6 +10,7 @@ import streamlit as st
 from fpl.config import load_settings
 from fpl.ingest.pipeline import run_ingest
 from fpl.ingest.history import run_history
+from fpl.models.horizon import attach_horizon
 from fpl.models.prior import next_unfinished_event
 from fpl.optimize.chips import run_chips
 from fpl.optimize.pool import default_season_event
@@ -159,6 +160,18 @@ def _player_catalog_live(settings) -> pd.DataFrame:
     return _finalize_catalog(rows[keep])
 
 
+def _with_horizon(catalog: pd.DataFrame, settings, event: int) -> pd.DataFrame:
+    if catalog.empty:
+        return catalog
+    fixtures_path = settings.processed_dir / "fixtures.parquet"
+    teams_path = settings.processed_dir / "teams.parquet"
+    if not fixtures_path.exists():
+        return catalog
+    fixtures = pd.read_parquet(fixtures_path)
+    teams = pd.read_parquet(teams_path) if teams_path.exists() else pd.DataFrame()
+    return attach_horizon(catalog, fixtures, teams, from_event=int(event))
+
+
 def _need_saved_15() -> bool:
     return len(_read_squad_ids(_squad_path())) != SQUAD_SIZE
 
@@ -225,6 +238,7 @@ def main() -> None:
         catalog = _player_catalog_live(cfg)
     else:
         catalog = _player_catalog(panel, season) if panel is not None else pd.DataFrame()
+    catalog = _with_horizon(catalog, cfg, int(event))
 
     saved_ids = _read_squad_ids(_squad_path())
     valid_ids = set(catalog["element_id"].tolist()) if not catalog.empty else set()
@@ -283,13 +297,18 @@ def main() -> None:
         )
 
     with xfer_tab:
-        _render_transfers_tab(season=str(season), event=int(event), free_transfers=int(free_transfers))
+        _render_transfers_tab(
+            season=str(season),
+            event=int(event),
+            free_transfers=int(free_transfers),
+            catalog=catalog,
+        )
 
     with chip_tab:
         _render_chips_tab(season=str(season), event=int(event), free_transfers=int(free_transfers))
 
     with wild_tab:
-        _render_wildcard_tab(season=str(season), event=int(event))
+        _render_wildcard_tab(season=str(season), event=int(event), catalog=catalog)
 
     with advisor_tab:
         # Prefer the pitch if it is a full 15; otherwise the last file on disk.
@@ -358,10 +377,16 @@ def _render_my_team(
     if last is not None:
         st.divider()
         st.markdown("**Last transfer score** (Transfers tab)")
-        render_transfer_plan(last, note=st.session_state.get("last_transfer_note"))
+        render_transfer_plan(last, note=st.session_state.get("last_transfer_note"), catalog=catalog)
 
 
-def _render_transfers_tab(*, season: str, event: int, free_transfers: int) -> None:
+def _render_transfers_tab(
+    *,
+    season: str,
+    event: int,
+    free_transfers: int,
+    catalog: pd.DataFrame,
+) -> None:
     st.caption(
         "TAKE vs HOLD for the **saved** 15, after 4-point hits. "
         "This is expected points, not mini-league rank and not a 0–100 team rating."
@@ -387,7 +412,7 @@ def _render_transfers_tab(*, season: str, event: int, free_transfers: int) -> No
     if plan is None:
         st.info("Save your 15, then score. Recommendation uses the file on disk, not unsaved shirts.")
         return
-    render_transfer_plan(plan, note=st.session_state.get("last_transfer_note"))
+    render_transfer_plan(plan, note=st.session_state.get("last_transfer_note"), catalog=catalog)
 
 
 def _render_chips_tab(*, season: str, event: int, free_transfers: int) -> None:
@@ -416,7 +441,7 @@ def _render_chips_tab(*, season: str, event: int, free_transfers: int) -> None:
     render_chip_report(report, note=st.session_state.get("last_chip_note"))
 
 
-def _render_wildcard_tab(*, season: str, event: int) -> None:
+def _render_wildcard_tab(*, season: str, event: int, catalog: pd.DataFrame) -> None:
     st.caption("Rebuilds a legal 15 from scratch. Ignores your current team — wildcard-shaped comparison, not an edit.")
     if st.button("Rebuild 15 from scratch", type="primary"):
         with st.spinner("Solving squad…"):
@@ -431,7 +456,7 @@ def _render_wildcard_tab(*, season: str, event: int) -> None:
     if solution is None:
         st.info("Run this when you want a from-scratch EV 15 to compare against yours.")
         return
-    render_squad_solution(solution, note=st.session_state.get("last_squad_note"))
+    render_squad_solution(solution, note=st.session_state.get("last_squad_note"), catalog=catalog)
 
 
 if __name__ == "__main__":

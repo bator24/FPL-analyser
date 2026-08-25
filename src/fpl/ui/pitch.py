@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from fpl.ui.hover import render_player_frame, tooltip_text
 from fpl.optimize.rules import BUDGET_M, MAX_PER_CLUB, SQUAD_COUNTS, SQUAD_SIZE, normalize_position
 
 PITCH_ROWS = (("FWD", 3), ("MID", 5), ("DEF", 5), ("GKP", 2))
@@ -300,6 +301,13 @@ def _slot_label(row: pd.Series | None, position: str) -> str:
     return f"{name}\n{team} {cost_s}\n{pts_s}".strip()
 
 
+def _slot_help(row: pd.Series | None) -> str | None:
+    if row is None:
+        return "Empty shirt. Click, then pick a player on the right."
+    text = tooltip_text(row)
+    return text or None
+
+
 def _inject_css() -> None:
     if st.session_state.get("_fpl_pitch_css"):
         return
@@ -346,6 +354,7 @@ def render_squad_pitch(catalog: pd.DataFrame) -> list[int]:
                             key=f"pitch_{pos}_{slot_i}",
                             use_container_width=True,
                             type="primary" if active else "secondary",
+                            help=_slot_help(row),
                         ):
                             st.session_state.active_slot = (pos, slot_i)
                             st.rerun()
@@ -453,7 +462,17 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
     )
     show_cols = [
         c
-        for c in ["name", "position", "team", "cost_m", "points", "form", "selected_by_percent", "status"]
+        for c in [
+            "name",
+            "position",
+            "team",
+            "cost_m",
+            "points",
+            "form",
+            "next_5_short",
+            "selected_by_percent",
+            "status",
+        ]
         if c in filtered.columns
     ]
     rename = {
@@ -463,6 +482,7 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
         "cost_m": "£m",
         "points": "Pts",
         "form": "Form",
+        "next_5_short": "Next 5",
         "selected_by_percent": "Own %",
         "status": "Status",
     }
@@ -474,12 +494,8 @@ def _render_picker(catalog: pd.DataFrame, slots: dict[str, list[int | None]]) ->
             st.rerun()
         return
 
-    st.dataframe(
-        filtered[show_cols].rename(columns=rename).head(80),
-        hide_index=True,
-        use_container_width=True,
-        height=280,
-    )
+    hover_cols = [(rename[c], c) for c in show_cols]
+    render_player_frame(filtered, hover_cols, name_keys={"name"}, max_rows=80, max_height=280)
     labels = [_player_choice_label(row) for _, row in filtered.iterrows()]
     id_by_label = dict(zip(labels, filtered["element_id"].astype(int).tolist()))
     # Duplicate labels are rare (same display); keep first.
