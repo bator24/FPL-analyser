@@ -108,10 +108,10 @@ def test_menu_runner_up_is_a_different_single() -> None:
     plan = solve_transfers(pool, current, free_transfers=1, include_wildcard=False)
     assert plan.n_transfers == 1
     runners = [row for row in plan.alternatives if row["key"] == "runner_up_1"]
-    if runners:
-        headline_in = {r["name"] for r in plan.transfers_in}
-        alt_in = {r["name"] for r in runners[0]["transfers_in"]}
-        assert headline_in.isdisjoint(alt_in)
+    assert runners
+    headline_in = {r["name"] for r in plan.transfers_in}
+    alt_in = {r["name"] for r in runners[0]["transfers_in"]}
+    assert headline_in.isdisjoint(alt_in)
 
 
 def test_menu_flags_half_that_does_not_fit_alone() -> None:
@@ -140,6 +140,33 @@ def test_menu_flags_half_that_does_not_fit_alone() -> None:
     assert illegal
     in_names = {r.get("name") for row in illegal for r in row.get("transfers_in") or []}
     assert "Super" in in_names
+
+
+def test_menu_lists_several_distinct_singles() -> None:
+    base = toy_pool()
+    extra = pd.DataFrame(
+        [
+            _player(304, "FWD", name="Upgrade", team_id=14, cost_m=8.0, xpts=9.0, p_play=1.0),
+            _player(305, "MID", name="MidStar", team_id=15, cost_m=4.5, xpts=8.0, p_play=1.0),
+            _player(306, "MID", name="MidB", team_id=16, cost_m=4.5, xpts=7.4, p_play=1.0),
+            _player(307, "DEF", name="DefStar", team_id=17, cost_m=4.5, xpts=6.0, p_play=1.0),
+        ]
+    )
+    pool = pd.concat([base, extra], ignore_index=True)
+    plan = solve_transfers(
+        pool,
+        set(base["element_id"]),
+        free_transfers=1,
+        include_wildcard=False,
+    )
+    singles = [
+        row
+        for row in plan.alternatives
+        if int(row["n_transfers"]) == 1 and row.get("legal")
+    ]
+    ins = {r.get("name") for row in singles for r in row.get("transfers_in") or []}
+    assert len(singles) >= 3
+    assert len(ins) >= 3
 
 
 def test_wildcard_rebuilds_without_hits() -> None:

@@ -19,8 +19,9 @@ SYSTEM = (
     "official FPL form, last match, official FPL flags, and the next five fixtures. "
     "Say if the fixtures actually support selling him, or if you are moving him for this week only. "
     "Recommend the headline transfers only if expected_net vs hold is positive after 4-point hits. "
-    "Always offer the other legal ideas in `alternatives`: best single, next-best single, "
-    "and each half of a multi-move scored on its own. Say if a half does not fit the bank. "
+    "Always offer the other legal ideas in `alternatives`: several one-move options, "
+    "not just one runner-up, plus each half of a multi-move scored on its own. "
+    "Say if a half does not fit the bank. "
     "Chips are this-week arithmetic only — never tell the user to auto-play TC/BB/FH/WC. "
     "Write like you are talking. Speak in first person."
 )
@@ -311,12 +312,15 @@ def _alternatives_section(
             if focus_fold in _fold(_move_names(alt))
             else 1,
         )
+    illegal = [alt for alt in ordered if not alt.get("legal", True)]
+    legal = [alt for alt in ordered if alt.get("legal", True)]
+    shown = legal[:8] + illegal
     lines = [
         "If you do not want the headline package — tight bank, or you only like one of the moves — "
         "pick **one** of these instead. You do not have to do the rest.",
         "",
     ]
-    for alt in ordered:
+    for alt in shown:
         names = _move_names(alt)
         net = float(alt.get("expected_net") or 0)
         hits = int(alt.get("hits") or 0)

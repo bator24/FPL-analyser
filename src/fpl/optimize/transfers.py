@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,12 @@ from fpl.optimize.rules import (
     CAPTAIN_MIN_P_PLAY,
     FREE_TRANSFERS_DEFAULT,
     HIT_COST,
+    MAX_PER_CLUB,
     MAX_TRANSFERS_DEFAULT,
+    POSITION_ORDER,
     SQUAD_SIZE,
+    club_key,
+    legality_errors,
     normalize_position,
 )
 from fpl.optimize.squad import SquadSolution, format_squad_report, solve_squad
@@ -30,6 +35,12 @@ from fpl.optimize.squad import SquadSolution, format_squad_report, solve_squad
 
 BACKTEST_SEASONS = ("2024-25", "2025-26")
 BACKTEST_EVENTS = (10, 16, 22, 28, 34)
+MENU_MARKET_PER_POS = 30
+MENU_SINGLE_SCORE = 16
+MENU_SINGLE_KEEP = 8
+MENU_PAIR_SCORE = 6
+MENU_PAIR_KEEP = 4
+LOCKED_XI_TIME = 8
 
 
 @dataclass
@@ -211,6 +222,42 @@ def _option_from_solution(
     )
 
 
+def _pool_view(work: pd.DataFrame) -> pd.DataFrame:
+    out = work.copy()
+    out["element_id"] = pd.to_numeric(out["element_id"], errors="coerce")
+    out = out.dropna(subset=["element_id"])
+    out["element_id"] = out["element_id"].astype(int)
+    out["position"] = out["position"].map(normalize_position)
+    out["cost_m"] = pd.to_numeric(out["cost_m"], errors="coerce").fillna(0.0)
+    out["xpts"] = pd.to_numeric(out["xpts"], errors="coerce").fillna(0.0)
+    out["club"] = club_key(out).astype(str)
+    return out.drop_duplicates("element_id")
+
+
+def _illegal_option(
+    current: set[int],
+    new_ids: set[int],
+    names: pd.DataFrame,
+    *,
+    n: int,
+    hits: int,
+    key: str,
+    label: str,
+    note: str,
+) -> dict[str, Any]:
+    return _option_dict(
+        key=key,
+        label=label,
+        n_transfers=n,
+        hits=hits,
+        expected_net=0.0,
+        transfers_out=_rows_for_ids(names, current - new_ids),
+        transfers_in=_rows_for_ids(names, new_ids - current),
+        legal=False,
+        note=note or "This move does not fit — budget or three-per-club. You cannot take it on its own.",
+    )
+
+
 def _score_locked_squad(
     work: pd.DataFrame,
     current: set[int],
@@ -234,29 +281,26 @@ def _score_locked_squad(
     if n <= 0:
         return None
     hits = max(0, n - int(free_transfers))
+    eids = pd.to_numeric(work["element_id"], errors="coerce")
+    slim = work.loc[eids.isin(new_ids)].drop_duplicates("element_id")
+    have = set(pd.to_numeric(slim["element_id"], errors="coerce").dropna().astype(int))
+    if have != set(new_ids) or legality_errors(slim, budget_m=budget):
+        return _illegal_option(
+            current, new_ids, names, n=n, hits=hits, key=key, label=label, note=note
+        )
     try:
         sol = solve_squad(
-            work,
+            slim,
             budget_m=budget,
             captain_min_p_play=captain_min_p_play,
             season=season,
             event=event,
             locked_ids=new_ids,
-            time_limit=30,
+            time_limit=LOCKED_XI_TIME,
         )
     except RuntimeError:
-        out_ids = current - new_ids
-        in_ids = new_ids - current
-        return _option_dict(
-            key=key,
-            label=label,
-            n_transfers=n,
-            hits=hits,
-            expected_net=0.0,
-            transfers_out=_rows_for_ids(names, out_ids),
-            transfers_in=_rows_for_ids(names, in_ids),
-            legal=False,
-            note=note or "This move does not fit — budget or three-per-club. You cannot take it on its own.",
+        return _illegal_option(
+            current, new_ids, names, n=n, hits=hits, key=key, label=label, note=note
         )
     net = float(sol.objective - hits * float(hit_cost) - hold.objective)
     out_ids = current - sol.squad_ids
@@ -274,6 +318,85 @@ def _score_locked_squad(
     )
 
 
+def _enumerate_singles(
+    view: pd.DataFrame,
+    current: set[int],
+    budget: float,
+) -> list[tuple[int, int, float]]:
+    """Legal same-position 1-for-1 swaps, ranked by incoming minus outgoing xPts."""
+    cur = view.loc[view["element_id"].isin(current)]
+    mkt = view.loc[~view["element_id"].isin(current)]
+    if cur.empty or mkt.empty:
+        return []
+    clubs = Counter(cur["club"].astype(str))
+    spent = float(cur["cost_m"].sum())
+    found: list[tuple[int, int, float]] = []
+    for pos in POSITION_ORDER:
+        owned = cur.loc[cur["position"] == pos]
+        market = mkt.loc[mkt["position"] == pos].nlargest(MENU_MARKET_PER_POS, "xpts")
+        if owned.empty or market.empty:
+            continue
+        for _, out in owned.iterrows():
+            out_id = int(out["element_id"])
+            out_x = float(out["xpts"])
+            out_cost = float(out["cost_m"])
+            out_club = str(out["club"])
+            for _, inn in market.iterrows():
+                in_x = float(inn["xpts"])
+                if in_x < out_x - 0.5:
+                    continue
+                in_club = str(inn["club"])
+                in_count = clubs[in_club] - (1 if out_club == in_club else 0)
+                if in_count + 1 > MAX_PER_CLUB:
+                    continue
+                if spent - out_cost + float(inn["cost_m"]) > budget + 1e-9:
+                    continue
+                found.append((out_id, int(inn["element_id"]), in_x - out_x))
+    found.sort(key=lambda row: -row[2])
+    return found
+
+
+def _pick_diverse_singles(
+    cands: list[tuple[int, int, float]],
+    *,
+    limit: int,
+) -> list[tuple[int, int, float]]:
+    """Prefer different incoming players, then different sales, then a second target."""
+    picked: list[tuple[int, int, float]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def _take(*, in_cap: int, out_cap: int) -> None:
+        in_n: Counter[int] = Counter()
+        out_n: Counter[int] = Counter()
+        for out_id, in_id, _crude in picked:
+            in_n[in_id] += 1
+            out_n[out_id] += 1
+        for row in cands:
+            if len(picked) >= limit:
+                return
+            out_id, in_id, _crude = row
+            fp = (out_id, in_id)
+            if fp in seen:
+                continue
+            if in_n[in_id] >= in_cap or out_n[out_id] >= out_cap:
+                continue
+            seen.add(fp)
+            picked.append(row)
+            in_n[in_id] += 1
+            out_n[out_id] += 1
+
+    _take(in_cap=1, out_cap=1)
+    _take(in_cap=1, out_cap=2)
+    _take(in_cap=2, out_cap=2)
+    return picked
+
+
+def _move_label(opt: dict[str, Any]) -> str:
+    left = ", ".join(str(r.get("name") or "?") for r in opt.get("transfers_out") or []) or "?"
+    right = ", ".join(str(r.get("name") or "?") for r in opt.get("transfers_in") or []) or "?"
+    return f"{left} → {right}"
+
+
 def build_transfer_menu(
     work: pd.DataFrame,
     current: set[int],
@@ -289,14 +412,24 @@ def build_transfer_menu(
     season: str | None,
     event: int | None,
 ) -> list[dict[str, Any]]:
-    """Legal other ideas besides the headline plan. One-move options first.
+    """Other ideas besides the headline plan. Enumerated 1-for-1s, not extra full-market ILPs.
 
     A two-move TAKE is a bundle. If the user only likes one half, or the bank is tight,
-    they need the best single and each half scored on its own.
+    they need several legal singles and each half scored on its own.
     """
     headline = _option_fingerprint(current - chosen.squad_ids, chosen.squad_ids - current)
     seen: set[tuple[tuple[int, ...], tuple[int, ...]]] = {headline}
     menu: list[dict[str, Any]] = []
+    view = _pool_view(work)
+    score_kw: dict[str, Any] = {
+        "budget": budget,
+        "names": names,
+        "free_transfers": free_transfers,
+        "hit_cost": hit_cost,
+        "captain_min_p_play": captain_min_p_play,
+        "season": season,
+        "event": event,
+    }
 
     def _add(opt: dict[str, Any] | None) -> None:
         if not opt:
@@ -325,76 +458,6 @@ def build_transfer_menu(
         seen.add(fp)
         menu.append(opt)
 
-    for k, label in ((1, "Best single transfer"), (2, "Best two transfers"), (3, "Best three transfers")):
-        if k > int(max_transfers) or k == int(chosen.n_transfers):
-            continue
-        try:
-            sol = solve_squad(
-                work,
-                budget_m=budget,
-                captain_min_p_play=captain_min_p_play,
-                season=season,
-                event=event,
-                current_ids=current,
-                max_transfers=k,
-                free_transfers=free_transfers,
-                hit_cost=hit_cost,
-                time_limit=30,
-            )
-        except RuntimeError:
-            continue
-        if sol.n_transfers <= 0:
-            continue
-        note = (
-            "Do this if you only want one move — free transfer, no need to like the rest of the package."
-            if k == 1
-            else "A bigger package. Only better than the single if the extra hit is worth it."
-        )
-        _add(
-            _option_from_solution(
-                current, hold, sol, names, key=f"best_{k}", label=label, note=note
-            )
-        )
-
-    one = next((row for row in menu if row["key"] == "best_1" and row["legal"]), None)
-    if one is None and int(chosen.n_transfers) == 1:
-        one = _option_from_solution(
-            current, hold, chosen, names, key="best_1", label="Best single transfer"
-        )
-    if one and one["legal"]:
-        drop = _id_set(one["transfers_in"])
-        slim = work.loc[
-            ~pd.to_numeric(work["element_id"], errors="coerce").isin(drop)
-            | pd.to_numeric(work["element_id"], errors="coerce").isin(current)
-        ].copy()
-        try:
-            sol = solve_squad(
-                slim,
-                budget_m=budget,
-                captain_min_p_play=captain_min_p_play,
-                season=season,
-                event=event,
-                current_ids=current,
-                max_transfers=1,
-                free_transfers=free_transfers,
-                hit_cost=hit_cost,
-                time_limit=30,
-            )
-            if sol.n_transfers == 1:
-                _add(
-                    _option_from_solution(
-                        current,
-                        hold,
-                        sol,
-                        names,
-                        key="runner_up_1",
-                        label="Next-best single transfer",
-                        note="If you do not like the best single, this is the next legal one-move.",
-                    )
-                )
-        except RuntimeError:
-            pass
-
     if int(chosen.n_transfers) >= 2:
         outs = _rows_for_ids(names, current - chosen.squad_ids)
         ins = _rows_for_ids(names, chosen.squad_ids - current)
@@ -404,33 +467,122 @@ def build_transfer_menu(
                 in_id = int(right["element_id"])
             except (KeyError, TypeError, ValueError):
                 continue
-            new_ids = (current - {out_id}) | {in_id}
             out_name = left.get("name") or "out"
             in_name = right.get("name") or "in"
             _add(
                 _score_locked_squad(
                     work,
                     current,
-                    new_ids,
+                    (current - {out_id}) | {in_id},
                     hold,
-                    budget=budget,
-                    names=names,
-                    free_transfers=free_transfers,
-                    hit_cost=hit_cost,
-                    captain_min_p_play=captain_min_p_play,
-                    season=season,
-                    event=event,
                     key=f"only_{i}",
                     label=f"Only {out_name} → {in_name}",
                     note=(
                         "This is one half of the headline package, scored as if you ignore the other move. "
                         "Use it if you like this idea and not the rest."
                     ),
+                    **score_kw,
                 )
             )
 
-    menu.sort(key=lambda row: (not row["legal"], -float(row["expected_net"])))
-    return menu
+    scored_singles: list[dict[str, Any]] = []
+    for out_id, in_id, _crude in _pick_diverse_singles(
+        _enumerate_singles(view, current, budget),
+        limit=MENU_SINGLE_SCORE,
+    ):
+        opt = _score_locked_squad(
+            work,
+            current,
+            (current - {out_id}) | {in_id},
+            hold,
+            key="single",
+            label="Single",
+            note="One move. Take this instead of the headline if it is the swap you actually want.",
+            **score_kw,
+        )
+        if opt and opt.get("legal"):
+            scored_singles.append(opt)
+    scored_singles.sort(key=lambda row: -float(row["expected_net"]))
+    headline_is_single = int(chosen.n_transfers) == 1
+    headline_ins = chosen.squad_ids - current
+    kept = 0
+    named_best = False
+    named_runner = False
+    used_ins: set[int] = set(headline_ins) if headline_is_single else set()
+    for opt in scored_singles:
+        if kept >= MENU_SINGLE_KEEP:
+            break
+        ins = _id_set(opt["transfers_in"])
+        fresh_in = bool(ins) and ins.isdisjoint(used_ins)
+        if not headline_is_single and not named_best:
+            opt["key"] = "best_1"
+            opt["label"] = "Best single transfer"
+            opt["note"] = (
+                "Do this if you only want one move — free transfer, no need to like the rest of the package."
+            )
+        elif not named_runner and fresh_in:
+            opt["key"] = "runner_up_1"
+            opt["label"] = "Next-best single transfer"
+            opt["note"] = "If you do not like the best single, this is the next legal one-move."
+        else:
+            opt["key"] = f"single_{kept}"
+            opt["label"] = _move_label(opt)
+        before = len(menu)
+        _add(opt)
+        if len(menu) <= before:
+            continue
+        if opt["key"] == "best_1":
+            named_best = True
+        elif opt["key"] == "runner_up_1":
+            named_runner = True
+        used_ins |= ins
+        kept += 1
+
+    if int(max_transfers) >= 2:
+        ones = [row for row in menu if row.get("legal") and int(row.get("n_transfers") or 0) == 1][:8]
+        pair_cands: list[tuple[set[int], dict[str, Any], dict[str, Any]]] = []
+        for i, left in enumerate(ones):
+            left_out = _id_set(left["transfers_out"])
+            left_in = _id_set(left["transfers_in"])
+            for right in ones[i + 1 :]:
+                right_out = _id_set(right["transfers_out"])
+                right_in = _id_set(right["transfers_in"])
+                if left_out & right_out or left_in & right_in:
+                    continue
+                new_ids = (current - left_out - right_out) | left_in | right_in
+                if len(new_ids) != SQUAD_SIZE:
+                    continue
+                pair_cands.append((new_ids, left, right))
+        pair_cands.sort(
+            key=lambda item: -(
+                float(item[1].get("expected_net") or 0) + float(item[2].get("expected_net") or 0)
+            )
+        )
+        pairs_kept = 0
+        for i, (new_ids, left, right) in enumerate(pair_cands[:MENU_PAIR_SCORE]):
+            if pairs_kept >= MENU_PAIR_KEEP:
+                break
+            opt = _score_locked_squad(
+                work,
+                current,
+                new_ids,
+                hold,
+                key=f"pair_{i}",
+                label=f"Two moves: {_move_label(left)}; {_move_label(right)}",
+                note="A two-move package you can take instead of the headline. Still a bundle.",
+                **score_kw,
+            )
+            if not opt or not opt.get("legal") or int(opt.get("n_transfers") or 0) != 2:
+                continue
+            before = len(menu)
+            _add(opt)
+            if len(menu) > before:
+                pairs_kept += 1
+
+    legal = [row for row in menu if row.get("legal")]
+    illegal = [row for row in menu if not row.get("legal")]
+    legal.sort(key=lambda row: -float(row["expected_net"]))
+    return legal + illegal
 
 
 def realized_xi_points(solution: SquadSolution) -> float | None:
