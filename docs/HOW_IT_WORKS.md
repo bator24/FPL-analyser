@@ -73,7 +73,7 @@ Rotation is the hard problem. A gradient boosting minutes model **lost** to last
 Structural FPL scoring, not a neural net:
 
 - Appearance (1 if plays, +1 if 60+)
-- Goals / assists from rolling xG / xA (or realised goals if xG is missing), scaled to expected minutes
+- Goals / assists from rolling xG / xA (or realised goals if FPL xG is missing), scaled to expected minutes. A genuine 0.00 xG stays 0. The Transfers **xG / xA** columns are that this-week figure for the sale and the replacement.
 - Clean sheet: Poisson P(team concedes 0) × P(plays 60+)
 - −1 per 2 goals conceded for GKP/DEF, saves for GKP, yellows
 - Bonus from a BPS/bonus blend (not a full 22-player BPS sim)

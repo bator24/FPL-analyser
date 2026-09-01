@@ -28,7 +28,8 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 ### Pitch
 
 - Click **Remove** under a filled shirt (or **Remove {name}** in the picker) to take them off. Clicking the shirt only selects it to replace. Hover a filled shirt for club, value, FPL form, and next 5 fixtures (official FDR, 5=hardest).
-- Player tables (picker, Transfers XI, out→in) use the same hover card. The out→in recommendation shows club, value, expected points, chance they play, form, and next 5 for **both** the sale and the player coming in.
+- Player tables (picker, Transfers XI, out→in) use the same hover card. The out→in recommendation shows club, value, expected points, **xG / xA**, chance they play, form, news, and next 5 for **both** the sale and the player coming in.
+- **xG / xA** on Transfers are this week's expected goals and assists from official FPL figures, scaled to the minutes the engine thinks they play. That already sits inside xPts — the columns just make the attacking case visible.
 - **Type a name in Search** (Salah, Fernandes, …). That box searches first/last/`web_name`, not the shirt you clicked. The **Choose** dropdown is also type-to-filter by those labels.
 - Filter further by club, price, total points; sort as you like.
 - Early in the season, **Pts** are often 0 — sort by price or form instead.
@@ -36,7 +37,8 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 
 ### How to read the numbers
 
-- **xPts** = expected FPL points if you field them, already haircut by the chance they blank.
+- **xPts** = expected FPL points if you field them, already haircut by the chance they blank. Goals and assists inside that number come from official FPL expected goals / expected assists (or rolling goals if FPL has no xG).
+- **xG / xA** on the transfer table = this week's expected goals and assists, same figures.
 - **p_play** = chance they play. Captain must be ≥ 0.75 when someone nailed exists.
 - Last-GW recap in the advisor is raw combined points (no captain, no auto-subs). Until 2026/27 histories exist, it uses last season’s finale mapped onto this 15.
 """

@@ -81,6 +81,8 @@ _CONTEXT_COLS = (
     "points_per_game",
     "news",
     "status",
+    "e_goals",
+    "e_assists",
     "transfers_in_event",
     "transfers_out_event",
 )
@@ -153,6 +155,12 @@ def tooltip_text(row: dict[str, Any] | pd.Series) -> str:
     news = _plain(data.get("news"))
     if news:
         bits.append(f"FPL: {news}")
+    xg = pd.to_numeric(pd.Series([data.get("e_goals")]), errors="coerce").iloc[0]
+    xa = pd.to_numeric(pd.Series([data.get("e_assists")]), errors="coerce").iloc[0]
+    if pd.notna(xg) or pd.notna(xa):
+        xg_s = f"{float(xg):.2f}" if pd.notna(xg) else "—"
+        xa_s = f"{float(xa):.2f}" if pd.notna(xa) else "—"
+        bits.append(f"This week expected goals {xg_s}, expected assists {xa_s} (FPL xG/xA).")
     tin = pd.to_numeric(pd.Series([data.get("transfers_in_event")]), errors="coerce").iloc[0]
     tout = pd.to_numeric(pd.Series([data.get("transfers_out_event")]), errors="coerce").iloc[0]
     market = []
@@ -262,8 +270,8 @@ def render_player_frame(
                 cells.append(name_cell(rec, display=_plain(rec.get(key)) or "—"))
             elif key == "cost_m":
                 cells.append(_cell(rec.get(key), money=True))
-            elif key in {"xpts", "p_play", "form", "selected_by_percent", "points_per_game"}:
-                digits = 2 if key in {"xpts", "p_play"} else 1
+            elif key in {"xpts", "p_play", "form", "selected_by_percent", "points_per_game", "e_goals", "e_assists"}:
+                digits = 2 if key in {"xpts", "p_play", "e_goals", "e_assists"} else 1
                 cells.append(_cell(rec.get(key), digits=digits))
             elif key == "points":
                 n = pd.to_numeric(pd.Series([rec.get(key)]), errors="coerce").iloc[0]

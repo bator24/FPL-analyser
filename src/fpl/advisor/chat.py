@@ -16,8 +16,9 @@ SYSTEM = (
     "Never say xPts, p_play, FDR, EV, or other short codes. Say expected points this week, "
     "chance he plays, FPL's fixture difficulty (1 easy, 5 brutal), and so on. "
     "When asked why a transfer, argue the full case for both the sale and the player coming in: "
-    "expected points, whether they start, price, official FPL form, last match, official FPL flags, "
-    "and the next five fixtures. "
+    "expected points, expected goals, expected assists, whether they start, price, official FPL form, "
+    "last match, official FPL flags, and the next five fixtures. "
+    "Say expected goals and expected assists, not xG/xA. "
     "If the user names a player, answer THAT question. Do not paste the whole TAKE, captain, chips, "
     "and every alternative. One swap, then only ideas that involve them. "
     "A grounded engine draft is supplied — rewrite it as a short pub argument. Keep the numbers. "
@@ -243,6 +244,22 @@ def _price_sentence(out: dict[str, Any], inn: dict[str, Any]) -> str:
     return ""
 
 
+def _attack_sentence(out: dict[str, Any], inn: dict[str, Any]) -> str:
+    og, ig = _num(out, "e_goals"), _num(inn, "e_goals")
+    oa, ia = _num(out, "e_assists"), _num(inn, "e_assists")
+    if og == 0 and ig == 0 and oa == 0 and ia == 0:
+        return ""
+    if abs(ig - og) < 0.05 and abs(ia - oa) < 0.05:
+        return ""
+    out_n = str(out.get("name") or "the outgoing player")
+    inn_n = str(inn.get("name") or "the incoming player")
+    return (
+        f"That is built from FPL expected goals and assists, scaled to the minutes I think they play: "
+        f"{inn_n} about {ig:.2f} expected goals and {ia:.2f} expected assists this week, "
+        f"{out_n} about {og:.2f} and {oa:.2f}."
+    )
+
+
 def _swap_story(
     out: dict[str, Any],
     inn: dict[str, Any],
@@ -275,6 +292,9 @@ def _swap_story(
             f"That {gap:.1f}-point swing this week is the actual argument. "
             "Not price rises, not your mini-league, not a tweet."
         )
+    attack = _attack_sentence(out, inn)
+    if attack:
+        sentences.append(attack)
     out_p = _num(out, "p_play")
     inn_p = _num(inn, "p_play")
     if abs(inn_p - out_p) >= 0.10:

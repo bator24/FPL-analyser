@@ -67,6 +67,8 @@ def collapse_gameweek(frame: pd.DataFrame) -> pd.DataFrame:
         "season": "first",
         "event": "first",
         "e_minutes": "sum",
+        "e_goals": "sum",
+        "e_assists": "sum",
         "news": "first",
         "status": "first",
         "chance_of_playing_next_round": "first",

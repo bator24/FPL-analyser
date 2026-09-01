@@ -211,6 +211,8 @@ def test_local_reply_explains_why_player_is_out() -> None:
                     "cost_m": 6.5,
                     "xpts": 1.98,
                     "p_play": 1.0,
+                    "e_goals": 0.12,
+                    "e_assists": 0.05,
                     "team": "WHU",
                     "form": 1.2,
                     "this_gw": "GW2 CHE (A) FDR5",
@@ -243,6 +245,8 @@ def test_local_reply_explains_why_player_is_out() -> None:
                     "cost_m": 5.0,
                     "xpts": 4.50,
                     "p_play": 1.0,
+                    "e_goals": 0.45,
+                    "e_assists": 0.22,
                     "team": "BRI",
                     "form": 4.0,
                     "this_gw": "GW2 WOL (H) FDR2",
@@ -278,6 +282,9 @@ def test_local_reply_explains_why_player_is_out() -> None:
     assert "recent form" in text
     assert "Last time out Wilson" in text
     assert "argument for selling Wilson" in text
+    assert "expected goals" in text
+    assert "0.45" in text
+    assert "xG" not in text
     assert "xPts" not in text
     assert "p_play" not in text
     assert "Take them" not in text

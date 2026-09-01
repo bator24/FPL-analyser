@@ -147,6 +147,8 @@ def _rows_for_ids(table: pd.DataFrame, ids: set[int]) -> list[dict[str, Any]]:
             "cost_m",
             "xpts",
             "p_play",
+            "e_goals",
+            "e_assists",
             "news",
             "status",
             "chance_of_playing_next_round",

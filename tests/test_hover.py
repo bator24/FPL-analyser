@@ -29,7 +29,10 @@ def test_name_cell_escapes_html() -> None:
     assert "title=" in html
 
 
-def test_tooltip_includes_official_fpl_news() -> None:
+def test_tooltip_includes_this_week_xg() -> None:
+    text = tooltip_text({"name": "Gomez", "e_goals": 0.42, "e_assists": 0.18})
+    assert "expected goals 0.42" in text
+    assert "expected assists 0.18" in text
     text = tooltip_text({"name": "Gomez", "team": "BHA", "news": "Knock - 75% chance of playing"})
     assert "FPL: Knock" in text
 

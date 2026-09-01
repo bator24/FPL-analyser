@@ -66,6 +66,37 @@ def test_structural_xpts_does_not_use_current_goals() -> None:
     assert out["e_goals"].iloc[0] < 1.0
 
 
+def test_structural_xpts_keeps_zero_xg() -> None:
+    frame = pd.DataFrame(
+        {
+            "season": ["2024-25"],
+            "element_id": [1],
+            "event": [10],
+            "position": ["FWD"],
+            "minutes_lag1": [90],
+            "minutes_r5": [90],
+            "played_r5": [1],
+            "played_60_r5": [1],
+            "expected_goals_r5": [0.0],
+            "expected_assists_r5": [0.0],
+            "goals_scored_r5": [1.5],
+            "assists_r5": [0.8],
+            "bonus_r5": [0.0],
+            "bps_r5": [10],
+            "total_points_r5": [2.0],
+            "opp_goals_r5": [1.2],
+            "opp_gf_r5": [1.1],
+            "expected_goals_conceded_r5": [1.0],
+            "was_home": [True],
+            "kickoff_time": ["2024-10-01T12:00:00Z"],
+            "fixture_id": [1],
+        }
+    )
+    out = structural_xpts(frame)
+    assert float(out["e_goals"].iloc[0]) == 0.0
+    assert float(out["e_assists"].iloc[0]) == 0.0
+
+
 def test_xpts_eval_includes_baselines_and_buckets() -> None:
     actual = pd.Series([0, 1, 3, 8])
     model = pd.Series([0.5, 1.5, 3.2, 6.0])

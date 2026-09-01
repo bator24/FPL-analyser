@@ -45,6 +45,8 @@ def _xi_columns(table: pd.DataFrame) -> list[tuple[str, str]]:
         ("Club", "team"),
         ("£m", "cost_m"),
         ("xPts", "xpts"),
+        ("xG", "e_goals"),
+        ("xA", "e_assists"),
         ("p_play", "p_play"),
         ("Form", "form"),
         ("Next 5", "next_5_short"),
@@ -73,6 +75,8 @@ def _player_side_cells(row: dict, catalog: pd.DataFrame | None) -> list[str]:
         _cell(data.get("team")),
         _cell(data.get("cost_m"), money=True),
         _cell(data.get("xpts"), digits=2),
+        _cell(data.get("e_goals"), digits=2),
+        _cell(data.get("e_assists"), digits=2),
         _cell(data.get("p_play"), digits=2),
         _cell(data.get("form"), digits=1),
         _cell(nxt),
@@ -95,6 +99,8 @@ def render_moves_table(plan: TransferPlan, catalog: pd.DataFrame | None = None) 
             "Club",
             "£m",
             "xPts",
+            "xG",
+            "xA",
             "p_play",
             "Form",
             "Next 5",
@@ -103,6 +109,8 @@ def render_moves_table(plan: TransferPlan, catalog: pd.DataFrame | None = None) 
             "Club",
             "£m",
             "xPts",
+            "xG",
+            "xA",
             "p_play",
             "Form",
             "Next 5",
@@ -112,7 +120,8 @@ def render_moves_table(plan: TransferPlan, catalog: pd.DataFrame | None = None) 
     )
     st.caption(
         "Incoming player gets the same columns as the sale: club, value, expected points this week, "
-        "chance they play, FPL form, next 5 (official FDR, 5=hardest), and official FPL news. "
+        "FPL expected goals / assists (xG / xA) scaled to expected minutes, chance they play, "
+        "FPL form, next 5 (official FDR, 5=hardest), and official FPL news. "
         "Hover a name for this-GW transfer counts."
     )
 

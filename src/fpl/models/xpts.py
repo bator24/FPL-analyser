@@ -66,13 +66,24 @@ def structural_xpts(frame: pd.DataFrame) -> pd.DataFrame:
     p_play = out["p_play"]
     p_60 = out["p_60"]
 
-    xg = scale_by_minutes(out.get("expected_goals_r5"), out.get("minutes_r5"), e_min)
-    xa = scale_by_minutes(out.get("expected_assists_r5"), out.get("minutes_r5"), e_min)
-    # Pre-xG seasons: fall back to realised rolling goals/assists.
+    xg_roll = (
+        pd.to_numeric(out["expected_goals_r5"], errors="coerce")
+        if "expected_goals_r5" in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    xa_roll = (
+        pd.to_numeric(out["expected_assists_r5"], errors="coerce")
+        if "expected_assists_r5" in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    xg = scale_by_minutes(xg_roll, out.get("minutes_r5"), e_min)
+    xa = scale_by_minutes(xa_roll, out.get("minutes_r5"), e_min)
+    # Pre-xG seasons: fall back to realised rolling goals/assists when FPL xG is missing.
+    # A genuine 0.00 xG must stay 0 — do not replace it with last season's goals.
     g_fb = scale_by_minutes(out.get("goals_scored_r5"), out.get("minutes_r5"), e_min)
     a_fb = scale_by_minutes(out.get("assists_r5"), out.get("minutes_r5"), e_min)
-    e_goals = xg.where(xg > 0, g_fb)
-    e_assists = xa.where(xa > 0, a_fb)
+    e_goals = xg.where(xg_roll.notna(), g_fb)
+    e_assists = xa.where(xa_roll.notna(), a_fb)
 
     appear = p_play * 1.0 + p_60 * 1.0
     attack = e_goals * _goal_pts(pos) + e_assists * ASSIST_POINTS
