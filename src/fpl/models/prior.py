@@ -544,6 +544,12 @@ def overlay_this_season_rates(frame: pd.DataFrame, players: pd.DataFrame | None 
         per_app = pd.to_numeric(out[src], errors="coerce") / apps.replace(0, np.nan)
         old = pd.to_numeric(out[dest], errors="coerce")
         out.loc[use, dest] = ((1.0 - w) * old.fillna(per_app) + w * per_app).loc[use]
+    mins_now = (boot_min / apps).clip(lower=0, upper=90)
+    for column in ("minutes_r5", "minutes_r3", "minutes_lag1"):
+        if column not in out.columns:
+            out[column] = np.nan
+        old = pd.to_numeric(out[column], errors="coerce")
+        out.loc[use, column] = ((1.0 - w) * old.fillna(mins_now) + w * mins_now).loc[use]
     for column, now in (
         ("played_r5", play_now),
         ("played_r3", play_now),

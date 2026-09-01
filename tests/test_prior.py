@@ -178,6 +178,33 @@ def test_this_season_xg_blends_into_last_season_roll() -> None:
     assert float(out["played_r5"].iloc[0]) > 0.4
 
 
+def test_this_season_xg_does_not_scale_against_injury_cameo_minutes() -> None:
+    """Isak-shaped: 2.08 xG in two 90s must not be treated as 2.08 xG per 20 last-season minutes."""
+    frame = pd.DataFrame(
+        {
+            "element_id": [379],
+            "minutes": [180],
+            "starts": [2],
+            "expected_goals": [2.08],
+            "expected_assists": [0.01],
+            "expected_goals_r5": [0.086],
+            "expected_assists_r5": [0.0],
+            "minutes_r5": [20.2],
+            "minutes_r3": [7.7],
+            "minutes_lag1": [90.0],
+            "played_r5": [0.4],
+            "played_60_r5": [0.2],
+        }
+    )
+    out = overlay_this_season_rates(frame)
+    assert float(out["minutes_r5"].iloc[0]) > 50
+    xg = float(out["expected_goals_r5"].iloc[0])
+    mins = float(out["minutes_r5"].iloc[0])
+    this_week = xg * 90.0 / mins
+    assert this_week < 1.5
+    assert this_week > 0.4
+
+
 def test_unmapped_signing_gets_weak_minutes_not_fake_xg() -> None:
     panel = pd.DataFrame([_gw(10, 38, 90)])
     players = pd.DataFrame(
