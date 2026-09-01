@@ -27,3 +27,14 @@ def test_name_cell_escapes_html() -> None:
     assert "&lt;img" in html
     assert 'class="fpl-name"' in html
     assert "title=" in html
+
+
+def test_tooltip_includes_official_fpl_news() -> None:
+    text = tooltip_text({"name": "Gomez", "team": "BHA", "news": "Knock - 75% chance of playing"})
+    assert "FPL: Knock" in text
+
+
+def test_tooltip_includes_this_gw_transfers() -> None:
+    text = tooltip_text({"name": "Mbeumo", "transfers_in_event": 124000, "transfers_out_event": 11000})
+    assert "in 124,000" in text
+    assert "out 11,000" in text

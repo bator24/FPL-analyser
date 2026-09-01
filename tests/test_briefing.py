@@ -102,6 +102,8 @@ def test_format_briefing_take_is_spoken_english() -> None:
     assert "| Out |" not in text
     assert "away at CHE" in text
     assert "Haaland" in text
+    assert "Gomez" in text
+    assert "at home to WOL" in text or "WOL" in text
 
 
 def test_format_briefing_hold_and_captain() -> None:
@@ -269,8 +271,8 @@ def test_local_reply_explains_why_player_is_out() -> None:
     text = local_reply(facts, "why do you want to transfer out wilson")
     assert "Wilson" in text
     assert "1.98" in text
-    assert "Take them" in text
     assert "You asked about Wilson" in text
+    assert "not the rest of the package" in text
     assert "away at CHE" in text
     assert "grim stretch" in text
     assert "recent form" in text
@@ -278,7 +280,15 @@ def test_local_reply_explains_why_player_is_out() -> None:
     assert "argument for selling Wilson" in text
     assert "xPts" not in text
     assert "p_play" not in text
+    assert "Take them" not in text
+    assert "Knock" not in text
+    assert "armband" not in text.casefold()
+    assert "chip" not in text.casefold()
+    assert "Haaland" not in text
     assert "Knock" in local_reply(facts, "why anderson")
+    keep = local_reply(facts, "why sell haaland")
+    assert "I'm not transferring Haaland" in keep
+    assert "Take them" not in keep
 
 
 def test_local_reply_is_honest_when_fixtures_are_kind() -> None:
@@ -425,3 +435,66 @@ def test_take_offers_alternatives_and_flags_illegal_half() -> None:
     assert "Best single transfer" in text
     assert "does not fit on its own" in text
     assert "Wilson → Gomez" in text
+
+
+def test_take_includes_incoming_flag_and_recap() -> None:
+    upcoming = {
+        "season": "2026-27",
+        "event": 2,
+        "action": "TAKE TRANSFERS",
+        "expected_net": 2.0,
+        "hold_ev": 50.0,
+        "chosen_ev": 52.0,
+        "n_transfers": 1,
+        "hits": 0,
+        "transfers_out": [
+            {
+                "name": "Wilson",
+                "position": "MID",
+                "cost_m": 6.5,
+                "xpts": 2.0,
+                "p_play": 1.0,
+                "team": "WHU",
+            }
+        ],
+        "transfers_in": [
+            {
+                "name": "Gomez",
+                "position": "MID",
+                "cost_m": 5.0,
+                "xpts": 4.5,
+                "p_play": 0.75,
+                "team": "BRI",
+                "this_gw": "GW2 WOL (H) FDR2",
+                "next_5_text": "GW2 WOL (H) FDR2",
+                "fixture_verdict": "Kind run (mean FDR 2.0; 0 of 1 at FDR 4+).",
+            }
+        ],
+        "captain_hold": {"name": "Haaland", "xpts": 7.0, "p_play": 1.0},
+        "chip_beats_no_chip": False,
+        "chip_note": "",
+    }
+    recap = {
+        "headline": "GW1",
+        "note": "",
+        "players": [{"name": "Gomez", "points": 6, "minutes": 90, "position": "MID"}],
+        "n_found": 1,
+        "total_points": 6,
+        "did_not_play": [],
+        "blanks": [],
+        "best": None,
+        "missing_ids": [],
+    }
+    flags = [
+        {
+            "name": "Gomez",
+            "status": "d",
+            "news": "Ankle - 75% chance of playing",
+            "chance_of_playing_next_round": 75.0,
+        }
+    ]
+    text = format_briefing(recap, upcoming, flags=flags)
+    assert "Gomez" in text
+    assert "Ankle" in text
+    assert "Last time out Gomez" in text
+    assert "6 points" in text

@@ -119,6 +119,7 @@ def test_normalize_players_cost_and_position() -> None:
     assert player["position"] == "FWD"
     assert player["cost_m"] == 14.0
     assert player["ep_next"] == 7.4
+    assert "transfers_in_event" in tables["players"].columns
     assert len(tables["teams"]) == 1
     assert len(tables["fixtures"]) == 1
     assert tables["fixtures"].iloc[0]["fixture_id"] == 10

@@ -119,7 +119,7 @@ Output: `data/processed/eval/chips.json`
 
 ## Advisor
 
-Last completed GW recap for your 15, then this week's HOLD/TAKE, captain, and chip EV — the engine in English, plus a chat that can only use those numbers.
+Last completed GW recap for your 15, then this week's HOLD/TAKE, captain, and chip EV — the engine in English, plus a chat that answers the question you asked (one named player is one swap, not a dump of the whole TAKE).
 
 ```powershell
 python -m fpl brief --squad data/overrides/squad.csv

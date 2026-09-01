@@ -21,18 +21,18 @@ This is a local expected-points tool for **your 15 this gameweek**. It does not 
 3. Click **Save squad**. It stays disabled until you have 2 GKP / 5 DEF / 5 MID / 3 FWD, **£100.0m or less**, and at most 3 from one club.
 4. Open **Transfers**. Read **TAKE** or **HOLD**. TAKE is only suggested if expected points beat doing nothing *after* 4-point hits. A two-move TAKE is a bundle — **Other ideas** lists several legal singles (and a few other two-move packages) you can pick instead, and will say if a half does not fit your bank on its own.
 5. Optionally open **Chips**. A starred line is this-week arithmetic — do **not** blindly play Triple Captain.
-6. Optionally open **Advisor**, generate the briefing, then ask **why that transfer**. The TAKE write-up argues like a conversation: expected points this week, whether they start, form, last match, official flags, and the next five fixtures — and will say if the fixtures do *not* support the sale. No spreadsheet codes. It only uses engine numbers, not Twitter.
+6. Optionally open **Advisor**, generate the briefing, then ask **why Wilson** (or whoever). Named questions get that one move — expected points, whether they start, form, flags, next five, and whether you can take it without the rest of a two-move bundle. Asking “what should I do this week” still gets the full TAKE. No spreadsheet codes. It only uses engine numbers, not Twitter.
 
 **Wildcard 15** ignores your team. Use it as a comparison, not as “my squad”.
 
 ### Pitch
 
 - Click **Remove** under a filled shirt (or **Remove {name}** in the picker) to take them off. Clicking the shirt only selects it to replace. Hover a filled shirt for club, value, FPL form, and next 5 fixtures (official FDR, 5=hardest).
-- Player tables (picker, Transfers XI, out→in) use the same hover card. Next 5 is also a visible column.
+- Player tables (picker, Transfers XI, out→in) use the same hover card. The out→in recommendation shows club, value, expected points, chance they play, form, and next 5 for **both** the sale and the player coming in.
 - **Type a name in Search** (Salah, Fernandes, …). That box searches first/last/`web_name`, not the shirt you clicked. The **Choose** dropdown is also type-to-filter by those labels.
 - Filter further by club, price, total points; sort as you like.
 - Early in the season, **Pts** are often 0 — sort by price or form instead.
-- Injured / doubtful flags come from official FPL `news`, not a scrape. If a presser changes minutes, that still belongs in `data/overrides/xmins.csv` (not in this screen yet).
+- Injured / doubtful flags come from official FPL `news`, not a scrape. A percentage in that news string haircuts expected minutes even if FPL left `chance_of_playing` blank. This season's minutes and xG from the bootstrap also mix into last year's form, so a haul or a blank after GW1 can move the TAKE. If a presser changes minutes beyond that, use `data/overrides/xmins.csv`.
 
 ### How to read the numbers
 

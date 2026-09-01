@@ -11,7 +11,14 @@ from fpl.models.horizon import merge_context
 from fpl.optimize.chips import ChipReport
 from fpl.optimize.squad import SquadSolution
 from fpl.optimize.transfers import TransferPlan
-from fpl.ui.hover import catalog_row, merge_catalog, name_cell, render_html_table, render_player_frame
+from fpl.ui.hover import (
+    _cell,
+    catalog_row,
+    merge_catalog,
+    name_cell,
+    render_html_table,
+    render_player_frame,
+)
 
 
 def _captain_name(solution: SquadSolution) -> str:
@@ -53,6 +60,26 @@ def render_xi_table(solution: SquadSolution, catalog: pd.DataFrame | None = None
     render_player_frame(table, cols, name_keys={"name"})
 
 
+def _player_side_cells(row: dict, catalog: pd.DataFrame | None) -> list[str]:
+    data = merge_context(dict(row), catalog_row(catalog, row.get("element_id")))
+    nxt = data.get("next_5_short") or data.get("next_5_text")
+    news = str(data.get("news") or "").strip()
+    if news in {"", "nan", "None", "<NA>"}:
+        news_cell = "—"
+    else:
+        news_cell = html.escape(news if len(news) <= 42 else news[:40] + "…")
+    return [
+        name_cell(data, display=str(data.get("name") or "—")),
+        _cell(data.get("team")),
+        _cell(data.get("cost_m"), money=True),
+        _cell(data.get("xpts"), digits=2),
+        _cell(data.get("p_play"), digits=2),
+        _cell(data.get("form"), digits=1),
+        _cell(nxt),
+        news_cell,
+    ]
+
+
 def render_moves_table(plan: TransferPlan, catalog: pd.DataFrame | None = None) -> None:
     n = max(len(plan.transfers_out), len(plan.transfers_in))
     if n <= 0:
@@ -61,22 +88,33 @@ def render_moves_table(plan: TransferPlan, catalog: pd.DataFrame | None = None) 
     for i in range(n):
         left = plan.transfers_out[i] if i < len(plan.transfers_out) else {}
         right = plan.transfers_in[i] if i < len(plan.transfers_in) else {}
-        left_d = merge_context(dict(left), catalog_row(catalog, left.get("element_id")))
-        right_d = merge_context(dict(right), catalog_row(catalog, right.get("element_id")))
-        lx = left.get("xpts")
-        rx = right.get("xpts")
-        lx_s = f"{float(lx):.2f}" if lx is not None and str(lx) != "" else "—"
-        rx_s = f"{float(rx):.2f}" if rx is not None and str(rx) != "" else "—"
-        rows.append(
-            [
-                name_cell(left_d, display=str(left_d.get("name") or "—")),
-                lx_s,
-                name_cell(right_d, display=str(right_d.get("name") or "—")),
-                rx_s,
-            ]
-        )
-    render_html_table(["Out", "Out xPts", "In", "In xPts"], rows)
-    st.caption("Hover a name for club, value, FPL form, and next 5 (official FDR, 5=hardest).")
+        rows.append(_player_side_cells(left, catalog) + _player_side_cells(right, catalog))
+    render_html_table(
+        [
+            "Out",
+            "Club",
+            "£m",
+            "xPts",
+            "p_play",
+            "Form",
+            "Next 5",
+            "News",
+            "In",
+            "Club",
+            "£m",
+            "xPts",
+            "p_play",
+            "Form",
+            "Next 5",
+            "News",
+        ],
+        rows,
+    )
+    st.caption(
+        "Incoming player gets the same columns as the sale: club, value, expected points this week, "
+        "chance they play, FPL form, next 5 (official FDR, 5=hardest), and official FPL news. "
+        "Hover a name for this-GW transfer counts."
+    )
 
 
 def render_transfer_plan(
@@ -112,19 +150,34 @@ def render_transfer_plan(
         )
         html_rows: list[list[str]] = []
         for alt in alts:
-            left = ", ".join(str(r.get("name") or "?") for r in alt.get("transfers_out") or [])
-            right = ", ".join(str(r.get("name") or "?") for r in alt.get("transfers_in") or [])
+            outs = [
+                merge_context(dict(r), catalog_row(catalog, r.get("element_id")))
+                for r in alt.get("transfers_out") or []
+            ]
+            ins = [
+                merge_context(dict(r), catalog_row(catalog, r.get("element_id")))
+                for r in alt.get("transfers_in") or []
+            ]
             legal = bool(alt.get("legal", True))
+            in_next = ", ".join(
+                str(r.get("next_5_short") or r.get("next_5_text") or "")
+                for r in ins
+            ).strip(", ")
             html_rows.append(
                 [
                     html.escape(str(alt.get("label") or "Option")),
-                    html.escape(f"{left} → {right}"),
+                    " ".join(name_cell(r) for r in outs) or "—",
+                    " ".join(name_cell(r) for r in ins) or "—",
+                    html.escape(in_next or "—"),
                     html.escape(f"{float(alt.get('expected_net') or 0):+.2f}"),
                     html.escape("yes" if legal else "no — not on its own"),
                     html.escape(str(int(alt.get("hits") or 0))),
                 ]
             )
-        render_html_table(["Idea", "Out → in", "vs hold", "Fits?", "Hits"], html_rows)
+        render_html_table(
+            ["Idea", "Out", "In", "In next 5", "vs hold", "Fits?", "Hits"],
+            html_rows,
+        )
     st.markdown("**Suggested XI**")
     render_xi_table(plan.chosen, catalog)
 

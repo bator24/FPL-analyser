@@ -8,6 +8,7 @@ availability (`news` / `chance_of_playing_*`). No journalism scrape.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,19 @@ FORM_MEAN_COLUMNS = (
 
 UNAVAILABLE_STATUS = frozenset({"u", "n"})
 UNMAPPED_DEFAULT_P_PLAY = 0.35
+_NEWS_PCT = re.compile(r"(\d+)\s*%")
+# After ~3 full appearances, this season's bootstrap rates fully replace last season.
+THIS_SEASON_BLEND_MINUTES = 270.0
+THIS_SEASON_BLEND_FLOOR = 45.0
+THIS_SEASON_RATE_MAP = (
+    ("expected_goals", "expected_goals_r5"),
+    ("expected_assists", "expected_assists_r5"),
+    ("goals_scored", "goals_scored_r5"),
+    ("assists", "assists_r5"),
+    ("expected_goals_conceded", "expected_goals_conceded_r5"),
+    ("clean_sheets", "clean_sheets_r5"),
+    ("bonus", "bonus_r5"),
+)
 # A handful of element-summary rows is not a season. Switching the live pool
 # onto that stub made every unmapped premium look like a 0.35 appearance.
 FORM_COVERAGE_MIN_PLAYERS = 200
@@ -267,8 +281,28 @@ def attach_event_fixtures(
     return matched.reset_index(drop=True)
 
 
+def chance_from_news(news: Any) -> float:
+    """Official FPL news often encodes the % when `chance_of_playing_*` is null."""
+    match = _NEWS_PCT.search(str(news or ""))
+    if not match:
+        return float("nan")
+    return float(match.group(1))
+
+
+def _play_chance_series(frame: pd.DataFrame) -> pd.Series:
+    if "chance_of_playing_next_round" in frame.columns:
+        chance = pd.to_numeric(frame["chance_of_playing_next_round"], errors="coerce")
+    else:
+        chance = pd.Series(np.nan, index=frame.index, dtype=float)
+    if "chance_of_playing_this_round" in frame.columns:
+        chance = chance.fillna(pd.to_numeric(frame["chance_of_playing_this_round"], errors="coerce"))
+    if "news" in frame.columns:
+        chance = chance.fillna(frame["news"].map(chance_from_news))
+    return chance
+
+
 def apply_fpl_availability(frame: pd.DataFrame) -> pd.DataFrame:
-    """Haircut minutes using official FPL status / chance_of_playing. Drop unavailable."""
+    """Haircut minutes using official FPL status / chance_of_playing / news %. Drop unavailable."""
     out = frame.copy()
     if "status" in out.columns:
         status = out["status"].fillna("a").astype(str).str.lower()
@@ -280,12 +314,7 @@ def apply_fpl_availability(frame: pd.DataFrame) -> pd.DataFrame:
     else:
         status = pd.Series("a", index=out.index)
 
-    if "chance_of_playing_next_round" in out.columns:
-        chance = pd.to_numeric(out["chance_of_playing_next_round"], errors="coerce")
-    else:
-        chance = pd.Series(np.nan, index=out.index, dtype=float)
-    if "chance_of_playing_this_round" in out.columns:
-        chance = chance.fillna(pd.to_numeric(out["chance_of_playing_this_round"], errors="coerce"))
+    chance = _play_chance_series(out)
     cap = (chance / 100.0).clip(0, 1)
     injured = status.isin(["i", "d"])
     cap = cap.where(~(injured & cap.isna()), 0.25)
@@ -466,6 +495,68 @@ def overlay_bootstrap_minutes(frame: pd.DataFrame, players: pd.DataFrame) -> pd.
     return merged.drop(columns=["_boot_min", "_boot_start"])
 
 
+def overlay_this_season_rates(frame: pd.DataFrame, players: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Blend this season's bootstrap xG/minutes into last-season rolls.
+
+    Early 2026/27 would otherwise keep last year's sales forever, because the
+    live prior is still 2025-26 form. `live` already carries bootstrap season
+    totals (`minutes`, `expected_goals`, …) next to mapped `*_r5` columns.
+    """
+    out = frame.copy()
+    if players is not None and not players.empty and "minutes" not in out.columns:
+        boot = players.copy()
+        boot["element_id"] = pd.to_numeric(boot["element_id"], errors="coerce")
+        boot = boot.dropna(subset=["element_id"])
+        boot["element_id"] = boot["element_id"].astype(int)
+        cols = ["element_id", "minutes", "starts", *(src for src, _ in THIS_SEASON_RATE_MAP)]
+        cols = [c for c in cols if c in boot.columns]
+        boot = boot[cols].drop_duplicates("element_id", keep="last")
+        out = out.merge(boot, on="element_id", how="left", suffixes=("", "_boot"))
+        for src, _dest in THIS_SEASON_RATE_MAP:
+            if src not in out.columns and f"{src}_boot" in out.columns:
+                out[src] = out[f"{src}_boot"]
+        if "minutes" not in out.columns and "minutes_boot" in out.columns:
+            out["minutes"] = out["minutes_boot"]
+        if "starts" not in out.columns and "starts_boot" in out.columns:
+            out["starts"] = out["starts_boot"]
+        out = out.drop(columns=[c for c in out.columns if c.endswith("_boot")])
+    if "minutes" not in out.columns:
+        return out
+    boot_min = pd.to_numeric(out["minutes"], errors="coerce").fillna(0).clip(lower=0)
+    starts = (
+        pd.to_numeric(out["starts"], errors="coerce").fillna(0).clip(lower=0)
+        if "starts" in out.columns
+        else pd.Series(0.0, index=out.index)
+    )
+    apps = starts.where(starts > 0, 1.0)
+    weight = (boot_min / THIS_SEASON_BLEND_MINUTES).clip(0, 1)
+    use = boot_min >= THIS_SEASON_BLEND_FLOOR
+    if not bool(use.any()):
+        return out
+    play_now = pd.Series(np.where(boot_min >= 60, 1.0, (boot_min / 90.0).clip(0, 1)), index=out.index)
+    p60_now = pd.Series(np.where(boot_min >= 60, 1.0, play_now * 0.7), index=out.index)
+    w = weight
+    for src, dest in THIS_SEASON_RATE_MAP:
+        if src not in out.columns:
+            continue
+        if dest not in out.columns:
+            out[dest] = np.nan
+        per_app = pd.to_numeric(out[src], errors="coerce") / apps.replace(0, np.nan)
+        old = pd.to_numeric(out[dest], errors="coerce")
+        out.loc[use, dest] = ((1.0 - w) * old.fillna(per_app) + w * per_app).loc[use]
+    for column, now in (
+        ("played_r5", play_now),
+        ("played_r3", play_now),
+        ("played_lag1", play_now),
+        ("played_60_r5", p60_now),
+    ):
+        if column not in out.columns:
+            out[column] = np.nan
+        old = pd.to_numeric(out[column], errors="coerce")
+        out.loc[use, column] = ((1.0 - w) * old.fillna(now) + w * now).loc[use]
+    return out
+
+
 def _fill_unmapped(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     mapped = (
@@ -475,12 +566,7 @@ def _fill_unmapped(frame: pd.DataFrame) -> pd.DataFrame:
     )
     if mapped.all():
         return out
-    if "chance_of_playing_next_round" in out.columns:
-        chance = pd.to_numeric(out["chance_of_playing_next_round"], errors="coerce")
-    else:
-        chance = pd.Series(np.nan, index=out.index, dtype=float)
-    if "chance_of_playing_this_round" in out.columns:
-        chance = chance.fillna(pd.to_numeric(out["chance_of_playing_this_round"], errors="coerce"))
+    chance = _play_chance_series(out)
     p = (chance / 100.0).clip(0, 1).fillna(UNMAPPED_DEFAULT_P_PLAY)
     fresh = ~mapped
     for column in ("played_r5", "played_r3", "played_lag1"):
@@ -540,6 +626,7 @@ def build_live_feature_frame(
     if overlay_season and str(overlay_season) != str(form_season):
         live = overlay_form_by_element_id(live, terminal_form(panel, overlay_season))
     live = overlay_bootstrap_minutes(live, players)
+    live = overlay_this_season_rates(live, players)
     n_mapped = int(live["mapped"].fillna(False).sum())
     n_unmapped = int((~live["mapped"].fillna(False)).sum())
     live = _fill_unmapped(live)

@@ -495,8 +495,17 @@ def build_weekly_briefing(
     recap = enrich_recap(recap, by_id)
     roster = roster_from_ids(ids, by_id)
     players_path = cfg.processed_dir / "players.parquet"
+    flag_ids = list(ids)
+    for bucket in (upcoming.get("transfers_in") or [], upcoming.get("transfers_out") or []):
+        for row in bucket:
+            try:
+                flag_ids.append(int(row["element_id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
     flags = (
-        squad_flags(pd.read_parquet(players_path), ids) if players_path.exists() else []
+        squad_flags(pd.read_parquet(players_path), list(dict.fromkeys(flag_ids)))
+        if players_path.exists()
+        else []
     )
     markdown = format_briefing(recap, upcoming, flags=flags)
     facts = {

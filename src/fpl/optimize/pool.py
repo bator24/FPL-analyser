@@ -67,6 +67,13 @@ def collapse_gameweek(frame: pd.DataFrame) -> pd.DataFrame:
         "season": "first",
         "event": "first",
         "e_minutes": "sum",
+        "news": "first",
+        "status": "first",
+        "chance_of_playing_next_round": "first",
+        "form": "first",
+        "transfers_in_event": "sum",
+        "transfers_out_event": "sum",
+        "event_points": "sum",
     }
     present = {k: v for k, v in agg.items() if k in work.columns}
     grouped = work.groupby("element_id", sort=False).agg(present).reset_index()

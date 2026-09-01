@@ -138,7 +138,24 @@ def merge_current_into_pool(pool: pd.DataFrame, current: pd.DataFrame) -> pd.Dat
 
 
 def _rows_for_ids(table: pd.DataFrame, ids: set[int]) -> list[dict[str, Any]]:
-    keep = [c for c in ["element_id", "name", "position", "cost_m", "xpts", "p_play"] if c in table.columns]
+    keep = [
+        c
+        for c in [
+            "element_id",
+            "name",
+            "position",
+            "cost_m",
+            "xpts",
+            "p_play",
+            "news",
+            "status",
+            "chance_of_playing_next_round",
+            "form",
+            "transfers_in_event",
+            "transfers_out_event",
+        ]
+        if c in table.columns
+    ]
     subset = table[table["element_id"].isin(ids)]
     return subset[keep].to_dict(orient="records")
 

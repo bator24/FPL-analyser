@@ -153,7 +153,12 @@ def _player_catalog_live(settings) -> pd.DataFrame:
             "form",
             "selected_by_percent",
             "status",
+            "news",
+            "chance_of_playing_next_round",
             "points_per_game",
+            "event_points",
+            "transfers_in_event",
+            "transfers_out_event",
         ]
         if c in rows.columns
     ]

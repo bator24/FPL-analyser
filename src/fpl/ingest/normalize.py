@@ -38,6 +38,11 @@ _PLAYER_NUMERIC = [
     "expected_assists",
     "expected_goal_involvements",
     "expected_goals_conceded",
+    "event_points",
+    "transfers_in",
+    "transfers_out",
+    "transfers_in_event",
+    "transfers_out_event",
 ]
 
 
@@ -150,6 +155,11 @@ def normalize(bootstrap: dict[str, Any], fixtures: list[dict[str, Any]] | dict[s
             "expected_assists",
             "expected_goal_involvements",
             "expected_goals_conceded",
+            "event_points",
+            "transfers_in",
+            "transfers_out",
+            "transfers_in_event",
+            "transfers_out_event",
         ],
     )
     players = _numeric(players, _PLAYER_NUMERIC)

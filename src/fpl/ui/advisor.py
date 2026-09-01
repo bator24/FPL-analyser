@@ -18,7 +18,7 @@ def render_advisor(
 ) -> None:
     st.caption(
         "Generate a last-GW recap plus this week's HOLD/TAKE and captain (same engine as **Transfers**). "
-        "Then ask **why that transfer** — the TAKE briefing argues the case in plain English, not xPts/p_play codes. "
+        "Then ask **why Wilson** or **why that transfer**. Named questions get that move, not a dump of the whole TAKE. "
         "Full click-order is in **How to use this app** at the top."
     )
     ready = len({int(i) for i in squad_ids}) == SQUAD_SIZE
@@ -70,7 +70,7 @@ def render_advisor(
     for message in st.session_state.get("advisor_chat") or []:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-    prompt = st.chat_input("Why this captain? Should I take the hit? How did X do?")
+    prompt = st.chat_input("Why Wilson? Should I take the hit? Who do I captain?")
     if not prompt:
         return
     history = [

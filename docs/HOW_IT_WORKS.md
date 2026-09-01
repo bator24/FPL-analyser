@@ -66,7 +66,7 @@ Rotation is the hard problem. A gradient boosting minutes model **lost** to last
 
 **last GW minutes → else last-3 mean → else 0**
 
-`p_play` / `p_60` come from rolling “did he play / did he play 60+” rates. You can override a player-GW in `data/overrides/xmins.csv` after a presser. Stale overrides look like false confidence — delete them when the news is old.
+`p_play` / `p_60` come from rolling “did he play / did he play 60+” rates. Official FPL `news` (including a % in the text when `chance_of_playing` is blank) haircuts those minutes. This season’s bootstrap minutes/xG blend into last season’s form so GW1+ results can move the TAKE. You can override a player-GW in `data/overrides/xmins.csv` after a presser. Stale overrides look like false confidence — delete them when the news is old.
 
 ### 4. Expected points (`xpts`)
 
@@ -129,7 +129,7 @@ Not a generic FPL chatbot. It writes a **weekly briefing** from your 15:
 
 - Last completed GW recap (or last season’s finale mapped by FPL `code` if 2026/27 has no rows yet)
 - This GW: HOLD vs TAKE, captain, chip EV — the same ILP as `transfer` / `chips`
-- Chat answers only from that briefing. Optional `OPENAI_API_KEY` rephrases; it still must not invent news or XIs
+- Chat answers only from that briefing. Named questions (e.g. **why Wilson**) get that one swap, not a dump of the whole TAKE. Optional `OPENAI_API_KEY` rephrases the grounded draft; it still must not invent news or XIs
 - A TAKE write-up argues in plain English (expected points, whether they start, form, last match, official flags, next five fixtures) and will say when fixtures do **not** support the sale
 
 ---

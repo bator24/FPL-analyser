@@ -31,6 +31,11 @@ CONTEXT_KEYS = (
     "hard_n",
     "next_fdr",
     "fixture_verdict",
+    "news",
+    "status",
+    "chance_of_playing_next_round",
+    "transfers_in_event",
+    "transfers_out_event",
 )
 
 
@@ -269,6 +274,11 @@ def context_from_attached(frame: pd.DataFrame) -> dict[int, dict[str, Any]]:
             "hard_n": None if _num(row.get("hard_n")) is None else int(_num(row.get("hard_n"))),
             "next_fdr": None if _num(row.get("next_fdr")) is None else int(_num(row.get("next_fdr"))),
             "fixture_verdict": str(row.get("fixture_verdict") or ""),
+            "news": str(row.get("news") or "").strip(),
+            "status": str(row.get("status") or "").strip(),
+            "chance_of_playing_next_round": _num(row.get("chance_of_playing_next_round")),
+            "transfers_in_event": _num(row.get("transfers_in_event")),
+            "transfers_out_event": _num(row.get("transfers_out_event")),
         }
         out[eid] = ctx
     return out

@@ -15,12 +15,17 @@ SYSTEM = (
     "Do not invent injuries, lineups, cup form, or news. If it is not in the facts, say you do not know. "
     "Never say xPts, p_play, FDR, EV, or other short codes. Say expected points this week, "
     "chance he plays, FPL's fixture difficulty (1 easy, 5 brutal), and so on. "
-    "When asked why a transfer, argue the full case: expected points, whether they start, price, "
-    "official FPL form, last match, official FPL flags, and the next five fixtures. "
+    "When asked why a transfer, argue the full case for both the sale and the player coming in: "
+    "expected points, whether they start, price, official FPL form, last match, official FPL flags, "
+    "and the next five fixtures. "
+    "If the user names a player, answer THAT question. Do not paste the whole TAKE, captain, chips, "
+    "and every alternative. One swap, then only ideas that involve them. "
+    "A grounded engine draft is supplied — rewrite it as a short pub argument. Keep the numbers. "
     "Say if the fixtures actually support selling him, or if you are moving him for this week only. "
     "Recommend the headline transfers only if expected_net vs hold is positive after 4-point hits. "
-    "Always offer the other legal ideas in `alternatives`: several one-move options, "
-    "not just one runner-up, plus each half of a multi-move scored on its own. "
+    "If they asked what to do this week (no named player), offer the other legal ideas in `alternatives`: "
+    "several one-move options, not just one runner-up, plus each half of a multi-move scored on its own. "
+    "If they named a player, only mention alternatives that involve that player. "
     "Say if a half does not fit the bank. "
     "Chips are this-week arithmetic only — never tell the user to auto-play TC/BB/FH/WC. "
     "Write like you are talking. Speak in first person."
@@ -135,7 +140,7 @@ def _describe_fixture_label(label: str) -> str:
     return f"gameweek {gw} {where}{extra}"
 
 
-def _fixtures_story(row: dict[str, Any]) -> str:
+def _fixtures_story(row: dict[str, Any], *, compact: bool = False) -> str:
     name = str(row.get("name") or "He")
     labels = [p.strip() for p in str(row.get("next_5_text") or "").split(",") if p.strip()]
     if not labels and row.get("this_gw"):
@@ -144,10 +149,19 @@ def _fixtures_story(row: dict[str, Any]) -> str:
         return ""
     described = [_describe_fixture_label(lab) for lab in labels]
     this = described[0]
+    run = _run_kind(row)
+    if compact:
+        bits = [f"This week {name} has {this}."]
+        if run == "hard":
+            bits.append("That is a grim stretch.")
+        elif run == "kind":
+            bits.append("The next five are actually kind.")
+        elif len(described) > 1:
+            bits.append("The next five are a mixed bag — not a fixture punt by themselves.")
+        return " ".join(bits)
     sentences = [f"This week {name} has {this}."]
     if len(described) > 1:
         sentences.append("Then: " + "; ".join(described[1:]) + ".")
-    run = _run_kind(row)
     if run == "hard":
         sentences.append("That is a grim stretch.")
     elif run == "kind":
@@ -236,6 +250,7 @@ def _swap_story(
     flags: list[dict[str, Any]],
     recap: dict[str, Any],
     focus: bool = False,
+    compact: bool = False,
 ) -> str:
     """Pub-argument paragraph for one out → in. Numbers stay; short codes do not."""
     out_n = str(out.get("name") or "him")
@@ -250,10 +265,16 @@ def _swap_story(
     out_bit = f"{out_n} ({who_out})" if who_out else out_n
     in_bit = f"{inn_n} ({who_in})" if who_in else inn_n
     sentences.append(f"I'd sell {out_bit} for {in_bit}.")
+    gap = ix - ox
     sentences.append(
         f"This week I only have {out_n} down for about {ox:.2f} points; {inn_n} is more like {ix:.2f}. "
         "That already includes the chance they sit — I am not pretending everyone plays 90."
     )
+    if compact and gap > 0.05:
+        sentences.append(
+            f"That {gap:.1f}-point swing this week is the actual argument. "
+            "Not price rises, not your mini-league, not a tweet."
+        )
     out_p = _num(out, "p_play")
     inn_p = _num(inn, "p_play")
     if abs(inn_p - out_p) >= 0.10:
@@ -269,10 +290,13 @@ def _swap_story(
     recap_s = _recap_sentence(recap, out_n)
     if recap_s:
         sentences.append(recap_s)
-    fx_out = _fixtures_story(out)
+    recap_in = _recap_sentence(recap, inn_n)
+    if recap_in:
+        sentences.append(recap_in)
+    fx_out = _fixtures_story(out, compact=compact)
     if fx_out:
         sentences.append(fx_out)
-    fx_in = _fixtures_story(inn)
+    fx_in = _fixtures_story(inn, compact=compact)
     if fx_in:
         sentences.append(fx_in)
     compare = _fixture_compare(out, inn)
@@ -315,11 +339,17 @@ def _alternatives_section(
     illegal = [alt for alt in ordered if not alt.get("legal", True)]
     legal = [alt for alt in ordered if alt.get("legal", True)]
     shown = legal[:8] + illegal
-    lines = [
-        "If you do not want the headline package — tight bank, or you only like one of the moves — "
-        "pick **one** of these instead. You do not have to do the rest.",
-        "",
-    ]
+    if focus:
+        intro = (
+            f"Other legal ideas that involve {focus} — pick **one**. "
+            "You do not have to do the rest of the package."
+        )
+    else:
+        intro = (
+            "If you do not want the headline package — tight bank, or you only like one of the moves — "
+            "pick **one** of these instead. You do not have to do the rest."
+        )
+    lines = [intro, ""]
     for alt in shown:
         names = _move_names(alt)
         net = float(alt.get("expected_net") or 0)
@@ -367,6 +397,112 @@ def _hit_sentence(hits: int, n: int) -> str:
         f"{n} moves, and you would take a {cost}-point hit for the extra "
         f"{'transfer' if hits == 1 else 'transfers'}."
     )
+
+
+def _swap_involves(out: dict[str, Any], inn: dict[str, Any], focus: str) -> bool:
+    return _fold(focus) in _fold(f"{out.get('name', '')} {inn.get('name', '')}")
+
+
+def _find_focused_swap(
+    upcoming: dict[str, Any], focus: str
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    pairs = _pair_moves(
+        list(upcoming.get("transfers_out") or []),
+        list(upcoming.get("transfers_in") or []),
+    )
+    for out, inn in pairs:
+        if _swap_involves(out, inn, focus):
+            return out, inn
+    for alt in upcoming.get("alternatives") or []:
+        for out, inn in _pair_moves(
+            list(alt.get("transfers_out") or []),
+            list(alt.get("transfers_in") or []),
+        ):
+            if _swap_involves(out, inn, focus):
+                return out, inn
+    return None
+
+
+def _alts_involving(alts: list[dict[str, Any]], focus: str) -> list[dict[str, Any]]:
+    folded = _fold(focus)
+    return [alt for alt in alts if folded in _fold(_move_names(alt))]
+
+
+def _package_aside(
+    upcoming: dict[str, Any],
+    focus: str,
+    out: dict[str, Any],
+    inn: dict[str, Any],
+    *,
+    has_alts: bool,
+) -> str:
+    n = int(upcoming.get("n_transfers") or 0)
+    hits = int(upcoming.get("hits") or 0)
+    net = _num(upcoming, "expected_net")
+    if n <= 1:
+        if hits <= 0:
+            return "This is a single free transfer vs doing nothing."
+        return f"This is a one-move, and it costs a {4 * hits}-point hit."
+    others = []
+    for left, right in _pair_moves(
+        list(upcoming.get("transfers_out") or []),
+        list(upcoming.get("transfers_in") or []),
+    ):
+        if _swap_involves(left, right, focus):
+            continue
+        others.append(
+            f"{left.get('name') or '?'} → {right.get('name') or '?'}"
+        )
+    other_txt = "; ".join(others) if others else "the other listed move"
+    hit_txt = "a free transfer" if hits <= 0 else f"a {4 * hits}-point hit"
+    out_n = str(out.get("name") or "him")
+    inn_n = str(inn.get("name") or "the replacement")
+    peel = (
+        "If you only want this swap, use a matching one-move idea below — do not peel it off the bundle "
+        "if it does not fit the bank on its own."
+        if has_alts
+        else (
+            "If you only want this swap, check it is legal on its own before you peel it off the bundle — "
+            "the other sale may be what funds it."
+        )
+    )
+    return (
+        f"{out_n} → {inn_n} is one half of a {n}-move TAKE ({hit_txt}). "
+        f"The rest of the package is {other_txt}. "
+        f"The full bundle is about {net:.1f} expected points better than sitting tight after the hit. "
+        f"You asked about {focus}, so I am not walking you through the other move unless you ask. "
+        f"{peel}"
+    )
+
+
+def focus_argument(
+    upcoming: dict[str, Any],
+    recap: dict[str, Any] | None = None,
+    flags: list[dict[str, Any]] | None = None,
+    *,
+    focus: str,
+) -> str:
+    """Answer one named player. Not a dump of the whole TAKE."""
+    recap = recap or {}
+    flags = flags or []
+    swap = _find_focused_swap(upcoming, focus)
+    if not swap:
+        return ""
+    out, inn = swap
+    asking_out = _fold(focus) in _fold(str(out.get("name") or ""))
+    who = str(out.get("name") if asking_out else inn.get("name") or focus)
+    focused_alts = _alts_involving(list(upcoming.get("alternatives") or []), focus)
+    lines = [
+        f"You asked about {who}, so here is that move — not the rest of the package.",
+        "",
+        _swap_story(out, inn, flags=flags, recap=recap, compact=True),
+        "",
+        _package_aside(upcoming, focus, out, inn, has_alts=bool(focused_alts)),
+    ]
+    extra = _alternatives_section(focused_alts, focus=focus)
+    if extra:
+        lines.extend(["", extra])
+    return "\n".join(line for line in lines if line is not None).strip()
 
 
 def take_argument(
@@ -492,12 +628,13 @@ def _mentioned(facts: dict[str, Any], question: str) -> list[str]:
 
 def explain_transfers(facts: dict[str, Any], *, focus: str | None = None) -> str:
     upcoming = facts.get("upcoming") or {}
-    return take_argument(
-        upcoming,
-        facts.get("recap") or {},
-        facts.get("flags") or [],
-        focus=focus,
-    )
+    recap = facts.get("recap") or {}
+    flags = facts.get("flags") or []
+    if focus:
+        focused = focus_argument(upcoming, recap, flags, focus=focus)
+        if focused:
+            return focused
+    return take_argument(upcoming, recap, flags, focus=focus)
 
 
 def _merged_named(facts: dict[str, Any], name: str) -> dict[str, Any]:
@@ -534,13 +671,16 @@ def _explain_player(facts: dict[str, Any], name: str, question: str) -> str:
     out_names = {_fold(str(r.get("name") or "")) for r in upcoming.get("transfers_out") or []}
     in_names = {_fold(str(r.get("name") or "")) for r in upcoming.get("transfers_in") or []}
     folded = _fold(name)
-    if folded in out_names or folded in in_names or any(
-        _has_word(q, w) for w in ("out", "transfer", "sell", "buy")
-    ):
+    if folded in out_names or folded in in_names:
         return explain_transfers(facts, focus=name)
 
     row = _merged_named(facts, name)
     bits: list[str] = []
+    asking_move = any(_has_word(q, w) for w in ("out", "transfer", "sell", "buy"))
+    if asking_move:
+        bits.append(
+            f"I'm not transferring {name}. He is not on this week's move list."
+        )
     if row:
         who = _club_price(row)
         label = f"{name} ({who})" if who else name
@@ -635,9 +775,10 @@ def advisor_api_key() -> str | None:
 
 
 def llm_reply(facts: dict[str, Any], history: list[dict[str, str]], question: str) -> str:
+    grounded = local_reply(facts, question)
     key = advisor_api_key()
     if not key:
-        return local_reply(facts, question)
+        return grounded
     model = os.environ.get("FPL_ADVISOR_MODEL") or "gpt-4o-mini"
     payload = {
         "model": model,
@@ -647,6 +788,15 @@ def llm_reply(facts: dict[str, Any], history: list[dict[str, str]], question: st
             {
                 "role": "system",
                 "content": "Engine facts JSON:\n" + json.dumps(_slim_facts(facts), ensure_ascii=False)[:24000],
+            },
+            {
+                "role": "system",
+                "content": (
+                    "Grounded engine draft. Rewrite this as a short pub argument that answers "
+                    "ONLY the user's last question. Keep the numbers. Do not add captain, chips, "
+                    "or other transfers unless they asked. Do not invent news, lineups, or extra moves.\n\n"
+                    + grounded
+                ),
             },
             *history[-8:],
             {"role": "user", "content": question},
@@ -666,14 +816,14 @@ def llm_reply(facts: dict[str, Any], history: list[dict[str, str]], question: st
         with urlopen(request, timeout=45) as response:
             raw = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        return local_reply(facts, question) + f"\n\n(Remote model failed: HTTP {exc.code}; used engine reply.)"
+        return grounded + f"\n\n(Remote model failed: HTTP {exc.code}; used engine reply.)"
     except URLError as exc:
-        return local_reply(facts, question) + f"\n\n(Remote model unreachable: {exc.reason}; used engine reply.)"
+        return grounded + f"\n\n(Remote model unreachable: {exc.reason}; used engine reply.)"
     choices = raw.get("choices") or []
     if not choices:
-        return local_reply(facts, question)
+        return grounded
     content = (choices[0].get("message") or {}).get("content")
-    return str(content or local_reply(facts, question))
+    return str(content or grounded)
 
 
 def _slim_facts(facts: dict[str, Any]) -> dict[str, Any]:

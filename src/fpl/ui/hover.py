@@ -79,6 +79,10 @@ _CONTEXT_COLS = (
     "hard_n",
     "next_fdr",
     "points_per_game",
+    "news",
+    "status",
+    "transfers_in_event",
+    "transfers_out_event",
 )
 
 
@@ -146,6 +150,18 @@ def tooltip_text(row: dict[str, Any] | pd.Series) -> str:
     verdict = _plain(data.get("fixture_verdict"))
     if verdict:
         bits.append(verdict)
+    news = _plain(data.get("news"))
+    if news:
+        bits.append(f"FPL: {news}")
+    tin = pd.to_numeric(pd.Series([data.get("transfers_in_event")]), errors="coerce").iloc[0]
+    tout = pd.to_numeric(pd.Series([data.get("transfers_out_event")]), errors="coerce").iloc[0]
+    market = []
+    if pd.notna(tin) and float(tin) != 0:
+        market.append(f"in {int(tin):,}")
+    if pd.notna(tout) and float(tout) != 0:
+        market.append(f"out {int(tout):,}")
+    if market:
+        bits.append("FPL transfers this GW: " + ", ".join(market))
     return "\n".join(bits) if bits else name
 
 

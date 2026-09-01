@@ -5,9 +5,11 @@ from fpl.models.prior import (
     apply_xmins_to_features,
     attach_event_fixtures,
     build_live_feature_frame,
+    chance_from_news,
     current_season_form_usable,
     next_unfinished_event,
     overlay_bootstrap_minutes,
+    overlay_this_season_rates,
     panel_has_gameweek,
     terminal_form,
 )
@@ -139,6 +141,41 @@ def test_unavailable_players_are_dropped() -> None:
     )
     out = apply_fpl_availability(frame)
     assert len(out) == 1
+
+
+def test_news_percent_haircuts_when_chance_is_blank() -> None:
+    assert chance_from_news("Knock - 75% chance of playing") == 75.0
+    frame = pd.DataFrame(
+        {
+            "status": ["d"],
+            "news": ["Knock - 75% chance of playing"],
+            "chance_of_playing_next_round": [None],
+            "played_r5": [1.0],
+            "played_lag1": [1.0],
+            "played_60_r5": [1.0],
+            "minutes_lag1": [90.0],
+            "has_fixture": [True],
+        }
+    )
+    out = apply_fpl_availability(frame)
+    assert float(out["played_r5"].iloc[0]) == 0.75
+
+
+def test_this_season_xg_blends_into_last_season_roll() -> None:
+    frame = pd.DataFrame(
+        {
+            "element_id": [1],
+            "minutes": [90],
+            "starts": [1],
+            "expected_goals": [0.0],
+            "expected_goals_r5": [0.6],
+            "played_r5": [0.4],
+        }
+    )
+    out = overlay_this_season_rates(frame)
+    # 90/270 weight → 2/3 last season + 1/3 this season (0 xG).
+    assert abs(float(out["expected_goals_r5"].iloc[0]) - 0.4) < 0.02
+    assert float(out["played_r5"].iloc[0]) > 0.4
 
 
 def test_unmapped_signing_gets_weak_minutes_not_fake_xg() -> None:
